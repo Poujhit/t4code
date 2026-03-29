@@ -1,0 +1,17 @@
+[package]
+name = "t4code"
+version = "0.0.14"
+description = "t4code Tauri desktop shell"
+authors = ["Poujhit"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.0.0", features = [] }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "2.0.0", features = [] }
+tauri-plugin-dialog = "2.0.0"
+tauri-plugin-opener = "2.0.0"
+uuid = { version = "1.11.0", features = ["v4"] }
+

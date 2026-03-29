@@ -1,0 +1,40 @@
+{
+  "name": "@t3tools/desktop-tauri",
+  "version": "0.0.14",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri:frontend:dev": "vite --host 127.0.0.1 --port 5743",
+    "tauri:frontend:build": "vite build",
+    "tauri:frontend:typecheck": "tsc --noEmit",
+    "tauri:frontend:test": "vitest run --passWithNoTests",
+    "tauri:dev": "node scripts/dev.mjs",
+    "tauri:build": "node scripts/build.mjs",
+    "tauri:check": "bun run tauri:frontend:typecheck && cargo check --manifest-path src-tauri/Cargo.toml",
+    "tauri:test": "bun run tauri:frontend:test && cargo test --manifest-path src-tauri/Cargo.toml",
+    "tauri:stage:server": "node scripts/stage-server-runtime.mjs",
+    "tauri:stage:node": "node scripts/prepare-node-runtime.mjs"
+  },
+  "dependencies": {
+    "@t3tools/contracts": "workspace:*",
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-opener": "^2.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@rolldown/plugin-babel": "^0.2.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/node": "catalog:",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
+    "babel-plugin-react-compiler": "^19.0.0-beta-e552027-20250112",
+    "tailwindcss": "^4.0.0",
+    "typescript": "catalog:",
+    "vite": "^8.0.0",
+    "vitest": "catalog:"
+  }
+}
