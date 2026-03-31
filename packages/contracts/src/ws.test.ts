@@ -73,6 +73,40 @@ it.effect("accepts git.preparePullRequestThread requests", () =>
   }),
 );
 
+it.effect("accepts projects.listDirectory requests with a null root path", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeWebSocketRequest({
+      id: "req-dir-1",
+      body: {
+        _tag: WS_METHODS.projectsListDirectory,
+        cwd: "/repo",
+        relativePath: null,
+      },
+    });
+    assert.strictEqual(parsed.body._tag, WS_METHODS.projectsListDirectory);
+    if (parsed.body._tag === WS_METHODS.projectsListDirectory) {
+      assert.strictEqual(parsed.body.relativePath, null);
+    }
+  }),
+);
+
+it.effect("rejects projects.listDirectory requests with an empty relative path string", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeWebSocketRequest({
+        id: "req-dir-2",
+        body: {
+          _tag: WS_METHODS.projectsListDirectory,
+          cwd: "/repo",
+          relativePath: "   ",
+        },
+      }),
+    );
+
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
 it.effect("accepts typed websocket push envelopes with sequence", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeWsResponse({
