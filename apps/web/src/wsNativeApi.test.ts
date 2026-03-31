@@ -121,6 +121,22 @@ afterEach(() => {
 });
 
 describe("wsNativeApi", () => {
+  it("forwards projects.listDirectory requests", async () => {
+    const { createWsNativeApi } = await import("./wsNativeApi");
+    requestMock.mockResolvedValue({ entries: [], truncated: false });
+
+    const api = createWsNativeApi();
+    await api.projects.listDirectory({
+      cwd: "/repo",
+      relativePath: "src",
+    });
+
+    expect(requestMock).toHaveBeenCalledWith(WS_METHODS.projectsListDirectory, {
+      cwd: "/repo",
+      relativePath: "src",
+    });
+  });
+
   it("delivers and caches valid server.welcome payloads", async () => {
     const { createWsNativeApi, onServerWelcome } = await import("./wsNativeApi");
 
