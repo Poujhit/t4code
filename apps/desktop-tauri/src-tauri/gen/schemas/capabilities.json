@@ -1,1 +1,9 @@
-{"main-capability":{"identifier":"main-capability","description":"Capabilities for the t4code main window","local":true,"windows":["main"],"permissions":["core:default","dialog:default","opener:default"]}}
+{
+  "main-capability": {
+    "identifier": "main-capability",
+    "description": "Capabilities for the t4code main window",
+    "local": true,
+    "windows": ["main"],
+    "permissions": ["core:default", "dialog:default", "opener:default"]
+  }
+}
