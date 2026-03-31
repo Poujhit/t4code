@@ -25,7 +25,9 @@ export function WorkspaceWorkbench(props: { threadId: ThreadId; workspaceRoot: s
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-card text-card-foreground">
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <PanelRightOpenIcon className="size-4" />
+          <PanelRightOpenIcon style={{ cursor: 'pointer' }} className="size-4" onClick={() => {
+            useWorkspaceWorkbenchStore.getState().setWorkspaceOpen(false);
+          }} />
           <span>Workspace</span>
         </div>
         <p
