@@ -4,6 +4,9 @@ import path from "node:path";
 import { runProcess } from "./processRunner";
 
 import {
+  ProjectDirectoryEntry,
+  ProjectListDirectoryInput,
+  ProjectListDirectoryResult,
   ProjectEntry,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
@@ -12,6 +15,7 @@ import {
 const WORKSPACE_CACHE_TTL_MS = 15_000;
 const WORKSPACE_CACHE_MAX_KEYS = 4;
 const WORKSPACE_INDEX_MAX_ENTRIES = 25_000;
+const WORKSPACE_DIRECTORY_LIST_MAX_ENTRIES = 1_000;
 const WORKSPACE_SCAN_READDIR_CONCURRENCY = 32;
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
 const IGNORED_DIRECTORY_NAMES = new Set([
@@ -63,6 +67,16 @@ function basenameOf(input: string): string {
     return input;
   }
   return input.slice(separatorIndex + 1);
+}
+
+function compareWorkspaceDirectoryEntries(
+  left: ProjectDirectoryEntry,
+  right: ProjectDirectoryEntry,
+): number {
+  if (left.kind !== right.kind) {
+    return left.kind === "directory" ? -1 : 1;
+  }
+  return left.name.localeCompare(right.name);
 }
 
 function toSearchableWorkspaceEntry(entry: ProjectEntry): SearchableWorkspaceEntry {
@@ -537,6 +551,111 @@ async function getWorkspaceIndex(cwd: string): Promise<WorkspaceIndex> {
 export function clearWorkspaceIndexCache(cwd: string): void {
   workspaceIndexCache.delete(cwd);
   inFlightWorkspaceIndexBuilds.delete(cwd);
+}
+
+function resolveWorkspaceDirectoryPath(input: ProjectListDirectoryInput): {
+  absolutePath: string;
+  normalizedRelativePath: string | null;
+} {
+  if (input.relativePath === null) {
+    return {
+      absolutePath: input.cwd,
+      normalizedRelativePath: null,
+    };
+  }
+
+  const trimmedPath = input.relativePath.trim();
+  if (trimmedPath === "." || trimmedPath === "./") {
+    throw new Error("Workspace directory path must be null for the root directory.");
+  }
+  if (path.isAbsolute(trimmedPath)) {
+    throw new Error("Workspace directory path must be relative to the project root.");
+  }
+
+  const absolutePath = path.resolve(input.cwd, trimmedPath);
+  const relativeToRoot = toPosixPath(path.relative(input.cwd, absolutePath));
+  if (
+    relativeToRoot.length === 0 ||
+    relativeToRoot === "." ||
+    relativeToRoot === ".." ||
+    relativeToRoot.startsWith("../") ||
+    path.isAbsolute(relativeToRoot)
+  ) {
+    throw new Error("Workspace directory path must stay within the project root.");
+  }
+  if (isPathInIgnoredDirectory(relativeToRoot)) {
+    throw new Error("Workspace directory path is unavailable.");
+  }
+
+  return {
+    absolutePath,
+    normalizedRelativePath: relativeToRoot,
+  };
+}
+
+export async function listWorkspaceDirectory(
+  input: ProjectListDirectoryInput,
+): Promise<ProjectListDirectoryResult> {
+  const { absolutePath, normalizedRelativePath } = resolveWorkspaceDirectoryPath(input);
+  const targetStat = await fs.stat(absolutePath).catch((error) => {
+    throw new Error(
+      `Workspace directory does not exist: ${error instanceof Error ? error.message : "unknown error"}`,
+      { cause: error },
+    );
+  });
+
+  if (!targetStat.isDirectory()) {
+    throw new Error("Workspace directory path must resolve to a directory.");
+  }
+
+  const dirents = await fs.readdir(absolutePath, { withFileTypes: true }).catch((error) => {
+    throw new Error(
+      `Unable to read workspace directory: ${error instanceof Error ? error.message : "unknown error"}`,
+      { cause: error },
+    );
+  });
+
+  const candidateEntries = dirents
+    .filter((dirent) => dirent.name.length > 0 && dirent.name !== "." && dirent.name !== "..")
+    .filter((dirent) => dirent.isDirectory() || dirent.isFile())
+    .filter((dirent) => !(dirent.isDirectory() && IGNORED_DIRECTORY_NAMES.has(dirent.name)))
+    .map((dirent) => {
+      const relativePath = toPosixPath(
+        normalizedRelativePath ? path.join(normalizedRelativePath, dirent.name) : dirent.name,
+      );
+      return {
+        dirent,
+        relativePath,
+      };
+    })
+    .filter((entry) => !isPathInIgnoredDirectory(entry.relativePath));
+
+  const shouldFilterWithGitIgnore = await isInsideGitWorkTree(input.cwd);
+  const allowedPathSet = shouldFilterWithGitIgnore
+    ? new Set(
+        await filterGitIgnoredPaths(
+          input.cwd,
+          candidateEntries.map((entry) => entry.relativePath),
+        ),
+      )
+    : null;
+
+  const entries = candidateEntries
+    .filter((entry) => (allowedPathSet ? allowedPathSet.has(entry.relativePath) : true))
+    .map(
+      (entry): ProjectDirectoryEntry => ({
+        path: entry.relativePath,
+        name: entry.dirent.name,
+        kind: entry.dirent.isDirectory() ? "directory" : "file",
+        parentPath: normalizedRelativePath,
+      }),
+    )
+    .toSorted(compareWorkspaceDirectoryEntries);
+
+  return {
+    entries: entries.slice(0, WORKSPACE_DIRECTORY_LIST_MAX_ENTRIES),
+    truncated: entries.length > WORKSPACE_DIRECTORY_LIST_MAX_ENTRIES,
+  };
 }
 
 export async function searchWorkspaceEntries(

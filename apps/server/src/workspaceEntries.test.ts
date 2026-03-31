@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { afterEach, assert, describe, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
-import { searchWorkspaceEntries } from "./workspaceEntries";
+import { listWorkspaceDirectory, searchWorkspaceEntries } from "./workspaceEntries";
 
 const tempDirs: string[] = [];
 
@@ -198,5 +198,83 @@ describe("searchWorkspaceEntries", () => {
     await searchWorkspaceEntries({ cwd, query: "", limit: 200 });
 
     assert.isAtMost(peakReads, 32);
+  });
+});
+
+describe("listWorkspaceDirectory", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const dir of tempDirs.splice(0, tempDirs.length)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("lists only direct children at the root and nested paths", async () => {
+    const cwd = makeTempDir("t3code-workspace-list-directory-");
+    writeFile(cwd, "src/components/Composer.tsx");
+    writeFile(cwd, "src/index.ts");
+    writeFile(cwd, "README.md");
+
+    const root = await listWorkspaceDirectory({ cwd, relativePath: null });
+    expect(root).toEqual({
+      entries: [
+        { path: "src", name: "src", kind: "directory", parentPath: null },
+        { path: "README.md", name: "README.md", kind: "file", parentPath: null },
+      ],
+      truncated: false,
+    });
+
+    const nested = await listWorkspaceDirectory({ cwd, relativePath: "src" });
+    expect(nested).toEqual({
+      entries: [
+        {
+          path: "src/components",
+          name: "components",
+          kind: "directory",
+          parentPath: "src",
+        },
+        { path: "src/index.ts", name: "index.ts", kind: "file", parentPath: "src" },
+      ],
+      truncated: false,
+    });
+  });
+
+  it("filters ignored directories from listings", async () => {
+    const cwd = makeTempDir("t3code-workspace-list-ignore-");
+    writeFile(cwd, "src/index.ts");
+    writeFile(cwd, "node_modules/pkg/index.js");
+    writeFile(cwd, ".git/HEAD");
+    writeFile(cwd, ".next/static/chunk.js");
+
+    const result = await listWorkspaceDirectory({ cwd, relativePath: null });
+
+    expect(result.entries).toEqual([
+      { path: "src", name: "src", kind: "directory", parentPath: null },
+    ]);
+  });
+
+  it("rejects absolute paths and path escapes", async () => {
+    const cwd = makeTempDir("t3code-workspace-list-safe-");
+    writeFile(cwd, "src/index.ts");
+
+    await expect(
+      listWorkspaceDirectory({ cwd, relativePath: path.join(cwd, "src") }),
+    ).rejects.toThrow("relative to the project root");
+    await expect(listWorkspaceDirectory({ cwd, relativePath: "../outside" })).rejects.toThrow(
+      "stay within the project root",
+    );
+  });
+
+  it("rejects missing paths and non-directories", async () => {
+    const cwd = makeTempDir("t3code-workspace-list-errors-");
+    writeFile(cwd, "src/index.ts");
+    writeFile(cwd, "README.md");
+
+    await expect(listWorkspaceDirectory({ cwd, relativePath: "missing" })).rejects.toThrow(
+      "does not exist",
+    );
+    await expect(listWorkspaceDirectory({ cwd, relativePath: "README.md" })).rejects.toThrow(
+      "must resolve to a directory",
+    );
   });
 });

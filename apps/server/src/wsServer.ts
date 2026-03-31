@@ -50,7 +50,7 @@ import { GitManager } from "./git/Services/GitManager.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { Keybindings } from "./keybindings";
 import { ServerSettingsService } from "./serverSettings";
-import { searchWorkspaceEntries } from "./workspaceEntries";
+import { listWorkspaceDirectory, searchWorkspaceEntries } from "./workspaceEntries";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
@@ -773,6 +773,17 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           catch: (cause) =>
             new RouteRequestError({
               message: `Failed to search workspace entries: ${String(cause)}`,
+            }),
+        });
+      }
+
+      case WS_METHODS.projectsListDirectory: {
+        const body = stripRequestTag(request.body);
+        return yield* Effect.tryPromise({
+          try: () => listWorkspaceDirectory(body),
+          catch: (cause) =>
+            new RouteRequestError({
+              message: `Failed to list workspace directory: ${String(cause)}`,
             }),
         });
       }
