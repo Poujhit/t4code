@@ -6,7 +6,7 @@ import {
 } from "@t3tools/contracts";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
-import { DiffIcon, TerminalSquareIcon } from "lucide-react";
+import { DiffIcon, FolderTreeIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
@@ -28,6 +28,8 @@ interface ChatHeaderProps {
   terminalOpen: boolean;
   terminalToggleShortcutLabel: string | null;
   diffToggleShortcutLabel: string | null;
+  workspaceAvailable: boolean;
+  workspaceOpen: boolean;
   gitCwd: string | null;
   diffOpen: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
@@ -35,6 +37,7 @@ interface ChatHeaderProps {
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleTerminal: () => void;
+  onToggleWorkspace: () => void;
   onToggleDiff: () => void;
 }
 
@@ -52,6 +55,8 @@ export const ChatHeader = memo(function ChatHeader({
   terminalOpen,
   terminalToggleShortcutLabel,
   diffToggleShortcutLabel,
+  workspaceAvailable,
+  workspaceOpen,
   gitCwd,
   diffOpen,
   onRunProjectScript,
@@ -59,6 +64,7 @@ export const ChatHeader = memo(function ChatHeader({
   onUpdateProjectScript,
   onDeleteProjectScript,
   onToggleTerminal,
+  onToggleWorkspace,
   onToggleDiff,
 }: ChatHeaderProps) {
   return (
@@ -102,6 +108,28 @@ export const ChatHeader = memo(function ChatHeader({
           />
         )}
         {activeProjectName && <GitActionsControl gitCwd={gitCwd} activeThreadId={activeThreadId} />}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                className="shrink-0"
+                pressed={workspaceOpen}
+                onPressedChange={onToggleWorkspace}
+                aria-label="Toggle workspace pane"
+                variant="outline"
+                size="xs"
+                disabled={!workspaceAvailable}
+              >
+                <FolderTreeIcon className="size-3" />
+              </Toggle>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {!workspaceAvailable
+              ? "Workspace pane is unavailable until this thread has an active project."
+              : "Toggle workspace pane"}
+          </TooltipPopup>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger
             render={
