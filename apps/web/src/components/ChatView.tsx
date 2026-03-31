@@ -178,6 +178,7 @@ import {
   SendPhase,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { useWorkspaceWorkbenchStore } from "~/workspaceWorkbenchStore";
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -406,6 +407,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const terminalState = useTerminalStateStore((state) =>
     selectThreadTerminalState(state.terminalStateByThreadId, threadId),
   );
+  const workspaceOpen = useWorkspaceWorkbenchStore((state) => state.isWorkspaceOpen);
+  const toggleWorkspaceOpen = useWorkspaceWorkbenchStore((state) => state.toggleWorkspaceOpen);
   const storeSetTerminalOpen = useTerminalStateStore((s) => s.setTerminalOpen);
   const storeSetTerminalHeight = useTerminalStateStore((s) => s.setTerminalHeight);
   const storeSplitTerminal = useTerminalStateStore((s) => s.splitTerminal);
@@ -3573,6 +3576,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           terminalOpen={terminalState.terminalOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
+          workspaceAvailable={activeProject !== undefined}
+          workspaceOpen={workspaceOpen}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
           onRunProjectScript={(script) => {
@@ -3582,6 +3587,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
+          onToggleWorkspace={toggleWorkspaceOpen}
           onToggleDiff={onToggleDiff}
         />
       </header>

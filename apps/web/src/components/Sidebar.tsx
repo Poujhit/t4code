@@ -350,8 +350,9 @@ function SortableProjectItem({
         transform: CSS.Translate.toString(transform),
         transition,
       }}
-      className={`group/menu-item relative rounded-md ${isDragging ? "z-20 opacity-80" : ""
-        } ${isOver && !isDragging ? "ring-1 ring-primary/40" : ""}`}
+      className={`group/menu-item relative rounded-md ${
+        isDragging ? "z-20 opacity-80" : ""
+      } ${isOver && !isDragging ? "ring-1 ring-primary/40" : ""}`}
       data-sidebar="menu-item"
       data-slot="sidebar-menu-item"
     >
@@ -1217,8 +1218,9 @@ export default function Sidebar() {
                   className={`inline-flex items-center gap-1 text-[10px] ${threadStatus.colorClass}`}
                 >
                   <span
-                    className={`h-1.5 w-1.5 rounded-full ${threadStatus.dotClass} ${threadStatus.pulse ? "animate-pulse" : ""
-                      }`}
+                    className={`h-1.5 w-1.5 rounded-full ${threadStatus.dotClass} ${
+                      threadStatus.pulse ? "animate-pulse" : ""
+                    }`}
                   />
                   <span className="hidden md:inline">{threadStatus.label}</span>
                 </span>
@@ -1272,10 +1274,11 @@ export default function Sidebar() {
                 </span>
               )}
               <span
-                className={`text-[10px] ${isHighlighted
+                className={`text-[10px] ${
+                  isHighlighted
                     ? "text-foreground/72 dark:text-foreground/82"
                     : "text-muted-foreground/40"
-                  }`}
+                }`}
               >
                 {formatRelativeTime(thread.updatedAt ?? thread.createdAt)}
               </span>
@@ -1291,8 +1294,9 @@ export default function Sidebar() {
           <SidebarMenuButton
             ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
             size="sm"
-            className={`gap-2 px-2 py-1.5 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground ${isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
-              }`}
+            className={`gap-2 px-2 py-1.5 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground ${
+              isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
+            }`}
             {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.attributes : {})}
             {...(isManualProjectSorting && dragHandleProps ? dragHandleProps.listeners : {})}
             onPointerDownCapture={handleProjectTitlePointerDownCapture}
@@ -1314,16 +1318,18 @@ export default function Sidebar() {
               >
                 <span className="absolute inset-0 flex items-center justify-center transition-opacity duration-150 group-hover/project-header:opacity-0">
                   <span
-                    className={`size-[9px] rounded-full ${projectStatus.dotClass} ${projectStatus.pulse ? "animate-pulse" : ""
-                      }`}
+                    className={`size-[9px] rounded-full ${projectStatus.dotClass} ${
+                      projectStatus.pulse ? "animate-pulse" : ""
+                    }`}
                   />
                 </span>
                 <ChevronRightIcon className="absolute inset-0 m-auto size-3.5 text-muted-foreground/70 opacity-0 transition-opacity duration-150 group-hover/project-header:opacity-100" />
               </span>
             ) : (
               <ChevronRightIcon
-                className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${project.expanded ? "rotate-90" : ""
-                  }`}
+                className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
+                  project.expanded ? "rotate-90" : ""
+                }`}
               />
             )}
             <ProjectFavicon cwd={project.cwd} />
@@ -1705,8 +1711,9 @@ export default function Sidebar() {
                   }
                 >
                   <PlusIcon
-                    className={`size-3.5 transition-transform duration-150 ${shouldShowProjectPathEntry ? "rotate-45" : "rotate-0"
-                      }`}
+                    className={`size-3.5 transition-transform duration-150 ${
+                      shouldShowProjectPathEntry ? "rotate-45" : "rotate-0"
+                    }`}
                   />
                 </TooltipTrigger>
                 <TooltipPopup side="right">
@@ -1732,10 +1739,11 @@ export default function Sidebar() {
               <div className="flex gap-1.5">
                 <input
                   ref={addProjectInputRef}
-                  className={`min-w-0 flex-1 rounded-md border bg-secondary px-2 py-1 font-mono text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none ${addProjectError
+                  className={`min-w-0 flex-1 rounded-md border bg-secondary px-2 py-1 font-mono text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none ${
+                    addProjectError
                       ? "border-red-500/70 focus:border-red-500"
                       : "border-border focus:border-ring"
-                    }`}
+                  }`}
                   placeholder="/path/to/project"
                   value={newCwd}
                   onChange={(event) => {
