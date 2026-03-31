@@ -16,10 +16,13 @@ import {
   parseDiffRouteSearch,
   stripDiffSearchParams,
 } from "../diffRouteSearch";
-import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useIsMobile, useMediaQuery } from "../hooks/useMediaQuery";
 import { useStore } from "../store";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
+import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { WorkspaceWorkbenchSurface } from "../components/workbench/WorkspaceWorkbenchSurface";
+import { useWorkspaceWorkbenchStore } from "../workspaceWorkbenchStore";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
 const DIFF_INLINE_LAYOUT_MEDIA_QUERY = "(max-width: 1180px)";
@@ -162,6 +165,7 @@ const DiffPanelInlineSidebar = (props: {
 
 function ChatThreadRouteView() {
   const threadsHydrated = useStore((store) => store.threadsHydrated);
+  const { activeDraftThread, activeThread, projects } = useHandleNewThread();
   const navigate = useNavigate();
   const threadId = Route.useParams({
     select: (params) => ThreadId.makeUnsafe(params.threadId),
@@ -174,9 +178,19 @@ function ChatThreadRouteView() {
   const routeThreadExists = threadExists || draftThreadExists;
   const diffOpen = search.diff === "1";
   const shouldUseDiffSheet = useMediaQuery(DIFF_INLINE_LAYOUT_MEDIA_QUERY);
+  const isMobile = useIsMobile();
+  const workspaceOpen = useWorkspaceWorkbenchStore((state) => state.isWorkspaceOpen);
+  const setWorkspaceOpen = useWorkspaceWorkbenchStore((state) => state.setWorkspaceOpen);
+  const syncThreadRoot = useWorkspaceWorkbenchStore((state) => state.syncThreadRoot);
   // TanStack Router keeps active route components mounted across param-only navigations
   // unless remountDeps are configured, so this stays warm across thread switches.
   const [hasOpenedDiff, setHasOpenedDiff] = useState(diffOpen);
+  const [hasOpenedWorkspace, setHasOpenedWorkspace] = useState(workspaceOpen);
+  const activeProject = projects.find(
+    (project) => project.id === (activeThread?.projectId ?? activeDraftThread?.projectId),
+  );
+  const workspaceRoot =
+    activeThread?.worktreePath ?? activeDraftThread?.worktreePath ?? activeProject?.cwd ?? null;
   const closeDiff = useCallback(() => {
     void navigate({
       to: "/$threadId",
@@ -194,12 +208,25 @@ function ChatThreadRouteView() {
       },
     });
   }, [navigate, threadId]);
+  const closeWorkspace = useCallback(() => {
+    setWorkspaceOpen(false);
+  }, [setWorkspaceOpen]);
 
   useEffect(() => {
     if (diffOpen) {
       setHasOpenedDiff(true);
     }
   }, [diffOpen]);
+
+  useEffect(() => {
+    if (workspaceOpen) {
+      setHasOpenedWorkspace(true);
+    }
+  }, [workspaceOpen]);
+
+  useEffect(() => {
+    syncThreadRoot(threadId, workspaceRoot);
+  }, [syncThreadRoot, threadId, workspaceRoot]);
 
   useEffect(() => {
     if (!threadsHydrated) {
@@ -217,6 +244,7 @@ function ChatThreadRouteView() {
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
+  const shouldRenderWorkspaceContent = workspaceOpen || hasOpenedWorkspace;
 
   if (!shouldUseDiffSheet) {
     return (
@@ -224,6 +252,14 @@ function ChatThreadRouteView() {
         <SidebarInset className="h-dvh  min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
           <ChatView key={threadId} threadId={threadId} />
         </SidebarInset>
+        <WorkspaceWorkbenchSurface
+          mobile={isMobile}
+          open={workspaceOpen}
+          threadId={threadId}
+          workspaceRoot={workspaceRoot}
+          onClose={closeWorkspace}
+          renderContent={shouldRenderWorkspaceContent}
+        />
         <DiffPanelInlineSidebar
           diffOpen={diffOpen}
           onCloseDiff={closeDiff}
@@ -239,6 +275,14 @@ function ChatThreadRouteView() {
       <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
         <ChatView key={threadId} threadId={threadId} />
       </SidebarInset>
+      <WorkspaceWorkbenchSurface
+        mobile={isMobile}
+        open={workspaceOpen}
+        threadId={threadId}
+        workspaceRoot={workspaceRoot}
+        onClose={closeWorkspace}
+        renderContent={shouldRenderWorkspaceContent}
+      />
       <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
         {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
       </DiffPanelSheet>
