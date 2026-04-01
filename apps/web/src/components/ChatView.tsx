@@ -123,6 +123,7 @@ import {
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelection } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { buildInsert, selectionMention, type CodeSelection } from "../lib/workspaceCodeSelection";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -238,6 +239,9 @@ const terminalContextIdListsEqual = (
 
 interface ChatViewProps {
   threadId: ThreadId;
+  registerCodeSelectionPromptHandler?: (
+    handler: ((selection: CodeSelection) => void) | null,
+  ) => void;
 }
 
 interface PendingPullRequestSetupRequest {
@@ -246,7 +250,7 @@ interface PendingPullRequestSetupRequest {
   scriptId: string;
 }
 
-export default function ChatView({ threadId }: ChatViewProps) {
+export default function ChatView({ threadId, registerCodeSelectionPromptHandler }: ChatViewProps) {
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const markThreadVisited = useStore((store) => store.markThreadVisited);
@@ -3286,6 +3290,31 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [activePendingProgress?.activeQuestion, activePendingUserInput, setPrompt],
   );
+  const addCodeSelectionToPrompt = useCallback(
+    (selection: CodeSelection) => {
+      if (isComposerApprovalState) {
+        return;
+      }
+
+      const editorHandle = composerEditorRef.current;
+      const snapshot = editorHandle?.readSnapshot();
+      const expandedCursor =
+        editorHandle?.isFocused() && snapshot ? snapshot.expandedCursor : promptRef.current.length;
+      const insertion = buildInsert(promptRef.current, selectionMention(selection), expandedCursor);
+
+      console.log("insertion", insertion);
+      console.log("promptRef.current", promptRef.current);
+      applyPromptReplacement(insertion.rangeStart, insertion.rangeEnd, insertion.replacement);
+    },
+    [applyPromptReplacement, isComposerApprovalState],
+  );
+
+  useEffect(() => {
+    registerCodeSelectionPromptHandler?.(addCodeSelectionToPrompt);
+    return () => {
+      registerCodeSelectionPromptHandler?.(null);
+    };
+  }, [addCodeSelectionToPrompt, registerCodeSelectionPromptHandler]);
 
   const readComposerSnapshot = useCallback((): {
     value: string;

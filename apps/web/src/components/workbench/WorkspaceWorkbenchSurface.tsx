@@ -8,6 +8,7 @@ import {
 } from "react";
 import { Sheet, SheetPopup } from "../ui/sheet";
 import { cn } from "~/lib/utils";
+import type { CodeSelection } from "~/lib/workspaceCodeSelection";
 import { clampWorkspacePaneWidth, useWorkspaceWorkbenchStore } from "~/workspaceWorkbenchStore";
 import { WorkspaceWorkbench } from "./WorkspaceWorkbench";
 
@@ -18,6 +19,7 @@ export function WorkspaceWorkbenchSurface(props: {
   workspaceRoot: string | null;
   onClose: () => void;
   renderContent: boolean;
+  onAddCodeSelectionToPrompt?: ((selection: CodeSelection) => void) | null;
 }) {
   const desktopWidth = useWorkspaceWorkbenchStore((state) => state.workspacePaneWidth);
   const setWorkspacePaneWidth = useWorkspaceWorkbenchStore((state) => state.setWorkspacePaneWidth);
@@ -87,7 +89,13 @@ export function WorkspaceWorkbenchSurface(props: {
           className="w-[min(92vw,960px)] max-w-[960px] p-0"
         >
           {props.renderContent ? (
-            <WorkspaceWorkbench threadId={props.threadId} workspaceRoot={props.workspaceRoot} />
+            <WorkspaceWorkbench
+              threadId={props.threadId}
+              workspaceRoot={props.workspaceRoot}
+              {...(props.onAddCodeSelectionToPrompt !== undefined
+                ? { onAddCodeSelectionToPrompt: props.onAddCodeSelectionToPrompt }
+                : {})}
+            />
           ) : null}
         </SheetPopup>
       </Sheet>
@@ -128,7 +136,13 @@ export function WorkspaceWorkbenchSurface(props: {
             onPointerDown={startResize}
             title="Drag to resize workspace pane"
           />
-          <WorkspaceWorkbench threadId={props.threadId} workspaceRoot={props.workspaceRoot} />
+          <WorkspaceWorkbench
+            threadId={props.threadId}
+            workspaceRoot={props.workspaceRoot}
+            {...(props.onAddCodeSelectionToPrompt !== undefined
+              ? { onAddCodeSelectionToPrompt: props.onAddCodeSelectionToPrompt }
+              : {})}
+          />
         </div>
       </div>
     </div>

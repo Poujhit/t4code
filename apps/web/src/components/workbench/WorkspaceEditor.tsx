@@ -13,17 +13,21 @@ import {
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { bracketMatching, indentOnInput } from "@codemirror/language";
 import { css } from "@codemirror/lang-css";
+import { go } from "@codemirror/lang-go";
 import { html } from "@codemirror/lang-html";
 import { javascript } from "@codemirror/lang-javascript";
 import { markdown } from "@codemirror/lang-markdown";
+import { python } from "@codemirror/lang-python";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 
+import { readNativeApi } from "~/nativeApi";
 import { basenameOfPath } from "~/vscode-icons";
 import {
   projectReadFileQueryOptions,
   projectWriteFileMutationOptions,
 } from "~/lib/projectReactQuery";
+import { getSelectedLines, langForPath, type CodeSelection } from "~/lib/workspaceCodeSelection";
 import { useWorkspaceWorkbenchStore, workspaceFileStateKey } from "~/workspaceWorkbenchStore";
 import { WorkspaceEditorHeader } from "./WorkspaceEditorHeader";
 import { WorkspaceFileFallback } from "./WorkspaceFileFallback";
@@ -47,20 +51,32 @@ function classifyWorkspaceFileError(error: unknown): {
 }
 
 function languageExtensionForPath(relativePath: string): Extension | null {
-  const lower = relativePath.toLowerCase();
-  if (lower.endsWith(".tsx")) return javascript({ jsx: true, typescript: true });
-  if (lower.endsWith(".ts")) return javascript({ typescript: true });
-  if (lower.endsWith(".jsx")) return javascript({ jsx: true });
-  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) {
-    return javascript();
-  }
-  if (lower.endsWith(".json")) return javascript();
-  if (lower.endsWith(".md") || lower.endsWith(".mdx")) return markdown();
-  if (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) {
-    return css();
-  }
-  if (lower.endsWith(".html") || lower.endsWith(".htm")) return html();
+  const language = langForPath(relativePath);
+  if (language === "tsx") return javascript({ jsx: true, typescript: true });
+  if (language === "ts") return javascript({ typescript: true });
+  if (language === "jsx") return javascript({ jsx: true });
+  if (language === "js" || language === "json") return javascript();
+  if (language === "md") return markdown();
+  if (language === "css") return css();
+  if (language === "html") return html();
+  if (language === "py") return python();
+  if (language === "go") return go();
   return null;
+}
+
+function readPrimarySelectionSnapshot(
+  view: EditorView,
+  relativePath: string,
+): CodeSelection | null {
+  const selected = getSelectedLines(view.state.doc, {
+    from: view.state.selection.main.from,
+    to: view.state.selection.main.to,
+  });
+  if (!selected) return null;
+  return {
+    ...selected,
+    relativePath,
+  } satisfies CodeSelection;
 }
 
 function editorTheme(_resolvedTheme: "light" | "dark"): Extension {
@@ -179,6 +195,7 @@ function createEditorExtensions(params: {
   resolvedTheme: "light" | "dark";
   onChange: (value: string) => void;
   onSave: () => void;
+  onAddSelectionToPrompt: (selection: CodeSelection) => void;
 }) {
   const languageExtension = languageExtensionForPath(params.relativePath);
 
@@ -201,6 +218,18 @@ function createEditorExtensions(params: {
           return true;
         },
       },
+      {
+        key: "Mod-Shift-Enter",
+        preventDefault: true,
+        run: (view) => {
+          const selection = readPrimarySelectionSnapshot(view, params.relativePath);
+          if (!selection) {
+            return false;
+          }
+          params.onAddSelectionToPrompt(selection);
+          return true;
+        },
+      },
       indentWithTab,
       ...defaultKeymap,
       ...historyKeymap,
@@ -209,6 +238,32 @@ function createEditorExtensions(params: {
       if (update.docChanged) {
         params.onChange(update.state.doc.toString());
       }
+    }),
+    EditorView.domEventHandlers({
+      contextmenu: (event, view) => {
+        const selection = readPrimarySelectionSnapshot(view, params.relativePath);
+        if (!selection) {
+          return false;
+        }
+
+        const api = readNativeApi();
+        if (!api) {
+          return false;
+        }
+
+        event.preventDefault();
+        void api.contextMenu
+          .show([{ id: "add-to-prompt", label: "Add to prompt" }], {
+            x: event.clientX,
+            y: event.clientY,
+          })
+          .then((clicked) => {
+            if (clicked === "add-to-prompt") {
+              params.onAddSelectionToPrompt(selection);
+            }
+          });
+        return true;
+      },
     }),
     editorTheme(params.resolvedTheme),
     ...(languageExtension ? [languageExtension] : []),
@@ -221,12 +276,14 @@ function CodeMirrorEditor(props: {
   resolvedTheme: "light" | "dark";
   onChange: (value: string) => void;
   onSave: () => void;
+  onAddSelectionToPrompt: (selection: CodeSelection) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const initialValueRef = useRef(props.value);
   const onChangeEvent = useEffectEvent(props.onChange);
   const onSaveEvent = useEffectEvent(props.onSave);
+  const onAddSelectionToPromptEvent = useEffectEvent(props.onAddSelectionToPrompt);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -240,6 +297,7 @@ function CodeMirrorEditor(props: {
         resolvedTheme: props.resolvedTheme,
         onChange: (value) => onChangeEvent(value),
         onSave: () => onSaveEvent(),
+        onAddSelectionToPrompt: (selection) => onAddSelectionToPromptEvent(selection),
       }),
     });
     const view = new EditorView({
@@ -284,6 +342,7 @@ export function WorkspaceEditor(props: {
   workspaceRoot: string;
   relativePath: string;
   resolvedTheme: "light" | "dark";
+  onAddCodeSelectionToPrompt?: ((selection: CodeSelection) => void) | null;
 }) {
   const queryClient = useQueryClient();
   const draftKey = workspaceFileStateKey(props.threadId, props.relativePath);
@@ -499,6 +558,9 @@ export function WorkspaceEditor(props: {
             relativePath={props.relativePath}
             value={currentContents}
             resolvedTheme={props.resolvedTheme}
+            onAddSelectionToPrompt={(selection) => {
+              props.onAddCodeSelectionToPrompt?.(selection);
+            }}
             onChange={(contents) =>
               setDraftContent(props.threadId, props.relativePath, {
                 contents,

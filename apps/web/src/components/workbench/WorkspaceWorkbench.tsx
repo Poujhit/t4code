@@ -3,12 +3,17 @@ import { useQuery } from "@tanstack/react-query";
 import { FolderTreeIcon, PanelRightOpenIcon } from "lucide-react";
 import { useTheme } from "~/hooks/useTheme";
 import { projectListDirectoryQueryOptions } from "~/lib/projectReactQuery";
+import type { CodeSelection } from "~/lib/workspaceCodeSelection";
 import { selectWorkspaceThreadState, useWorkspaceWorkbenchStore } from "~/workspaceWorkbenchStore";
 import { WorkbenchEmptyState } from "./WorkbenchEmptyState";
 import { WorkspaceEditor } from "./WorkspaceEditor";
 import { WorkspaceTree } from "./WorkspaceTree";
 
-export function WorkspaceWorkbench(props: { threadId: ThreadId; workspaceRoot: string | null }) {
+export function WorkspaceWorkbench(props: {
+  threadId: ThreadId;
+  workspaceRoot: string | null;
+  onAddCodeSelectionToPrompt?: ((selection: CodeSelection) => void) | null;
+}) {
   const { resolvedTheme } = useTheme();
   const threadState = useWorkspaceWorkbenchStore((state) =>
     selectWorkspaceThreadState(state.threadStateByThreadId, props.threadId),
@@ -63,6 +68,9 @@ export function WorkspaceWorkbench(props: { threadId: ThreadId; workspaceRoot: s
               workspaceRoot={props.workspaceRoot}
               relativePath={activeFilePath}
               resolvedTheme={resolvedTheme}
+              {...(props.onAddCodeSelectionToPrompt !== undefined
+                ? { onAddCodeSelectionToPrompt: props.onAddCodeSelectionToPrompt }
+                : {})}
             />
           ) : (
             <WorkbenchEmptyState

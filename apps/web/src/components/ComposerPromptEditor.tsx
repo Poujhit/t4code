@@ -63,6 +63,7 @@ import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   type TerminalContextDraft,
 } from "~/lib/terminalContext";
+import { lineLabel, selectionMention } from "~/lib/workspaceCodeSelection";
 import { cn } from "~/lib/utils";
 import { basenameOfPath, getVscodeIconUrlForEntry, inferEntryKindFromPath } from "~/vscode-icons";
 import {
@@ -77,6 +78,8 @@ const COMPOSER_EDITOR_HMR_KEY = `composer-editor-${Math.random().toString(36).sl
 type SerializedComposerMentionNode = Spread<
   {
     path: string;
+    lineStart?: number;
+    lineEnd?: number;
     type: "composer-mention";
     version: 1;
   },
@@ -100,29 +103,56 @@ const ComposerTerminalContextActionsContext = createContext<{
 
 class ComposerMentionNode extends TextNode {
   __path: string;
+  __lineStart: number | undefined;
+  __lineEnd: number | undefined;
 
   static override getType(): string {
     return "composer-mention";
   }
 
   static override clone(node: ComposerMentionNode): ComposerMentionNode {
-    return new ComposerMentionNode(node.__path, node.__key);
+    return new ComposerMentionNode(
+      {
+        path: node.__path,
+        ...(node.__lineStart !== undefined ? { lineStart: node.__lineStart } : {}),
+        ...(node.__lineEnd !== undefined ? { lineEnd: node.__lineEnd } : {}),
+      },
+      node.__key,
+    );
   }
 
   static override importJSON(serializedNode: SerializedComposerMentionNode): ComposerMentionNode {
-    return $createComposerMentionNode(serializedNode.path);
+    return $createComposerMentionNode({
+      path: serializedNode.path,
+      ...(serializedNode.lineStart !== undefined ? { lineStart: serializedNode.lineStart } : {}),
+      ...(serializedNode.lineEnd !== undefined ? { lineEnd: serializedNode.lineEnd } : {}),
+    });
   }
 
-  constructor(path: string, key?: NodeKey) {
-    const normalizedPath = path.startsWith("@") ? path.slice(1) : path;
-    super(`@${normalizedPath}`, key);
+  constructor(mention: { path: string; lineStart?: number; lineEnd?: number }, key?: NodeKey) {
+    const normalizedPath = mention.path.startsWith("@") ? mention.path.slice(1) : mention.path;
+    const lineStart = mention.lineStart;
+    const lineEnd = lineStart === undefined ? undefined : (mention.lineEnd ?? lineStart);
+    const tokenText =
+      lineStart === undefined
+        ? `@${normalizedPath}`
+        : selectionMention({
+            relativePath: normalizedPath,
+            startLine: lineStart,
+            endLine: lineEnd ?? lineStart,
+          });
+    super(tokenText, key);
     this.__path = normalizedPath;
+    this.__lineStart = lineStart;
+    this.__lineEnd = lineEnd;
   }
 
   override exportJSON(): SerializedComposerMentionNode {
     return {
       ...super.exportJSON(),
       path: this.__path,
+      ...(this.__lineStart !== undefined ? { lineStart: this.__lineStart } : {}),
+      ...(this.__lineEnd !== undefined ? { lineEnd: this.__lineEnd } : {}),
       type: "composer-mention",
       version: 1,
     };
@@ -133,7 +163,11 @@ class ComposerMentionNode extends TextNode {
     dom.className = COMPOSER_INLINE_CHIP_CLASS_NAME;
     dom.contentEditable = "false";
     dom.setAttribute("spellcheck", "false");
-    renderMentionChipDom(dom, this.__path);
+    renderMentionChipDom(dom, {
+      pathValue: this.__path,
+      ...(this.__lineStart !== undefined ? { lineStart: this.__lineStart } : {}),
+      ...(this.__lineEnd !== undefined ? { lineEnd: this.__lineEnd } : {}),
+    });
     return dom;
   }
 
@@ -143,8 +177,17 @@ class ComposerMentionNode extends TextNode {
     _config: EditorConfig,
   ): boolean {
     dom.contentEditable = "false";
-    if (prevNode.__text !== this.__text || prevNode.__path !== this.__path) {
-      renderMentionChipDom(dom, this.__path);
+    if (
+      prevNode.__text !== this.__text ||
+      prevNode.__path !== this.__path ||
+      prevNode.__lineStart !== this.__lineStart ||
+      prevNode.__lineEnd !== this.__lineEnd
+    ) {
+      renderMentionChipDom(dom, {
+        pathValue: this.__path,
+        ...(this.__lineStart !== undefined ? { lineStart: this.__lineStart } : {}),
+        ...(this.__lineEnd !== undefined ? { lineEnd: this.__lineEnd } : {}),
+      });
     }
     return false;
   }
@@ -166,8 +209,12 @@ class ComposerMentionNode extends TextNode {
   }
 }
 
-function $createComposerMentionNode(path: string): ComposerMentionNode {
-  return $applyNodeReplacement(new ComposerMentionNode(path));
+function $createComposerMentionNode(mention: {
+  path: string;
+  lineStart?: number;
+  lineEnd?: number;
+}): ComposerMentionNode {
+  return $applyNodeReplacement(new ComposerMentionNode(mention));
 }
 
 function ComposerTerminalContextDecorator(props: { context: TerminalContextDraft }) {
@@ -246,7 +293,10 @@ function resolvedThemeFromDocument(): "light" | "dark" {
   return document.documentElement.classList.contains("dark") ? "dark" : "light";
 }
 
-function renderMentionChipDom(container: HTMLElement, pathValue: string): void {
+function renderMentionChipDom(
+  container: HTMLElement,
+  mention: { pathValue: string; lineStart?: number; lineEnd?: number },
+): void {
   container.textContent = "";
   container.style.setProperty("user-select", "none");
   container.style.setProperty("-webkit-user-select", "none");
@@ -257,11 +307,22 @@ function renderMentionChipDom(container: HTMLElement, pathValue: string): void {
   icon.ariaHidden = "true";
   icon.className = COMPOSER_INLINE_CHIP_ICON_CLASS_NAME;
   icon.loading = "lazy";
-  icon.src = getVscodeIconUrlForEntry(pathValue, inferEntryKindFromPath(pathValue), theme);
+  icon.src = getVscodeIconUrlForEntry(
+    mention.pathValue,
+    inferEntryKindFromPath(mention.pathValue),
+    theme,
+  );
 
   const label = document.createElement("span");
   label.className = COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME;
-  label.textContent = basenameOfPath(pathValue);
+  const rangeLabel =
+    mention.lineStart === undefined
+      ? null
+      : lineLabel(mention.lineStart, mention.lineEnd ?? mention.lineStart);
+  label.textContent = rangeLabel
+    ? `${mention.pathValue} ${rangeLabel}`
+    : basenameOfPath(mention.pathValue);
+  container.title = rangeLabel ? `${mention.pathValue} ${rangeLabel}` : mention.pathValue;
 
   container.append(icon, label);
 }
@@ -600,7 +661,13 @@ function $setComposerEditorPrompt(
   const segments = splitPromptIntoComposerSegments(prompt, terminalContexts);
   for (const segment of segments) {
     if (segment.type === "mention") {
-      paragraph.append($createComposerMentionNode(segment.path));
+      paragraph.append(
+        $createComposerMentionNode({
+          path: segment.path,
+          ...(segment.lineStart !== undefined ? { lineStart: segment.lineStart } : {}),
+          ...(segment.lineEnd !== undefined ? { lineEnd: segment.lineEnd } : {}),
+        }),
+      );
       continue;
     }
     if (segment.type === "terminal-context") {
@@ -627,6 +694,7 @@ export interface ComposerPromptEditorHandle {
   focus: () => void;
   focusAt: (cursor: number) => void;
   focusAtEnd: () => void;
+  isFocused: () => boolean;
   readSnapshot: () => {
     value: string;
     cursor: number;
@@ -1032,9 +1100,13 @@ function ComposerPromptEditorInner({
           ),
         );
       },
+      isFocused: () => {
+        const rootElement = editor.getRootElement();
+        return Boolean(rootElement && document.activeElement === rootElement);
+      },
       readSnapshot,
     }),
-    [focusAt, readSnapshot],
+    [editor, focusAt, readSnapshot],
   );
 
   const handleEditorChange = useCallback((editorState: EditorState) => {

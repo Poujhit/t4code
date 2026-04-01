@@ -1,10 +1,12 @@
 import "../../index.css";
 
+import { EditorView } from "@codemirror/view";
 import type { NativeApi, ThreadId } from "@t3tools/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
+import { isMacPlatform } from "~/lib/utils";
 import {
   useWorkspaceWorkbenchStore,
   WORKSPACE_INLINE_DEFAULT_WIDTH,
@@ -17,6 +19,34 @@ afterEach(() => {
   localStorage.clear();
   delete (window as typeof window & { nativeApi?: NativeApi }).nativeApi;
 });
+
+function resetWorkbenchState() {
+  useWorkspaceWorkbenchStore.setState({
+    isWorkspaceOpen: false,
+    workspacePaneWidth: WORKSPACE_INLINE_DEFAULT_WIDTH,
+    threadStateByThreadId: {},
+    openFilePathsByThreadId: {},
+    activeFilePathByThreadId: {},
+    draftContentByThreadIdAndPath: {},
+    baseMtimeMsByThreadIdAndPath: {},
+    isDirtyByThreadIdAndPath: {},
+    lastLoadErrorByThreadIdAndPath: {},
+  });
+}
+
+async function waitForCodeMirrorView(): Promise<EditorView> {
+  let view: EditorView | null = null;
+  await vi.waitFor(() => {
+    const editorDom = document.querySelector<HTMLElement>(".cm-editor");
+    expect(editorDom).toBeTruthy();
+    view = editorDom ? EditorView.findFromDOM(editorDom) : null;
+    expect(view).toBeTruthy();
+  });
+  if (!view) {
+    throw new Error("Unable to find CodeMirror view.");
+  }
+  return view;
+}
 
 describe("WorkspaceWorkbench", () => {
   it("keeps tree expansion working and saves editor changes with the keyboard shortcut", async () => {
@@ -87,17 +117,7 @@ describe("WorkspaceWorkbench", () => {
       },
     } as unknown as NativeApi;
 
-    useWorkspaceWorkbenchStore.setState({
-      isWorkspaceOpen: false,
-      workspacePaneWidth: WORKSPACE_INLINE_DEFAULT_WIDTH,
-      threadStateByThreadId: {},
-      openFilePathsByThreadId: {},
-      activeFilePathByThreadId: {},
-      draftContentByThreadIdAndPath: {},
-      baseMtimeMsByThreadIdAndPath: {},
-      isDirtyByThreadIdAndPath: {},
-      lastLoadErrorByThreadIdAndPath: {},
-    });
+    resetWorkbenchState();
 
     const queryClient = new QueryClient();
     const host = document.createElement("div");
@@ -175,6 +195,113 @@ describe("WorkspaceWorkbench", () => {
         relativePath: "README.md",
       });
       expect(document.body.textContent ?? "").not.toContain("Unsaved");
+    });
+
+    await screen.unmount();
+    host.remove();
+  });
+
+  it("supports add-to-prompt from the editor shortcut and context menu for a non-empty primary selection", async () => {
+    const addCodeSelectionToPrompt = vi.fn();
+    const showContextMenu = vi.fn(async () => "add-to-prompt" as const);
+    window.nativeApi = {
+      projects: {
+        listDirectory: vi.fn(async ({ relativePath }: { relativePath: string | null }) => ({
+          entries:
+            relativePath === null
+              ? [{ path: "src/example.ts", name: "example.ts", kind: "file", parentPath: null }]
+              : [],
+          truncated: false,
+        })),
+        readFile: vi.fn(async ({ relativePath }: { relativePath: string }) => ({
+          relativePath,
+          contents: [
+            "export function example() {",
+            "  const value = 1;",
+            "  return value;",
+            "}",
+          ].join("\n"),
+          mtimeMs: 100,
+          sizeBytes: 64,
+          isBinary: false,
+          isTooLarge: false,
+        })),
+        searchEntries: vi.fn(),
+        writeFile: vi.fn(),
+      },
+      contextMenu: {
+        show: showContextMenu,
+      },
+    } as unknown as NativeApi;
+
+    resetWorkbenchState();
+
+    const queryClient = new QueryClient();
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceWorkbench
+          threadId={THREAD_ID}
+          workspaceRoot="/repo"
+          onAddCodeSelectionToPrompt={addCodeSelectionToPrompt}
+        />
+      </QueryClientProvider>,
+      { container: host },
+    );
+
+    await screen.getByRole("button", { name: "example.ts" }).click();
+    await expect.element(screen.getByTestId("workspace-editor")).toBeInTheDocument();
+
+    const view = await waitForCodeMirrorView();
+    const firstLine = view.state.doc.line(1);
+    const thirdLine = view.state.doc.line(3);
+
+    view.dispatch({
+      selection: {
+        anchor: firstLine.from + "export ".length,
+        head: thirdLine.from + "  return".length,
+      },
+    });
+    const editorContent = document.querySelector<HTMLElement>(".cm-content");
+    expect(editorContent).toBeTruthy();
+    editorContent!.focus();
+    editorContent!.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        shiftKey: true,
+        metaKey: isMacPlatform(navigator.platform),
+        ctrlKey: !isMacPlatform(navigator.platform),
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(addCodeSelectionToPrompt).toHaveBeenCalledWith({
+        relativePath: "src/example.ts",
+        startLine: 1,
+        endLine: 3,
+        selectedText: ["export function example() {", "  const value = 1;", "  return value;"].join(
+          "\n",
+        ),
+      });
+    });
+
+    addCodeSelectionToPrompt.mockClear();
+    editorContent!.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        clientX: 20,
+        clientY: 24,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(showContextMenu).toHaveBeenCalledWith(
+        [{ id: "add-to-prompt", label: "Add to prompt" }],
+        { x: 20, y: 24 },
+      );
+      expect(addCodeSelectionToPrompt).toHaveBeenCalledTimes(1);
     });
 
     await screen.unmount();

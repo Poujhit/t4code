@@ -1,6 +1,6 @@
 import { ThreadId } from "@t3tools/contracts";
 import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
-import { Suspense, lazy, type ReactNode, useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import ChatView from "../components/ChatView";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
@@ -22,6 +22,7 @@ import { Sheet, SheetPopup } from "../components/ui/sheet";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { WorkspaceWorkbenchSurface } from "../components/workbench/WorkspaceWorkbenchSurface";
+import type { CodeSelection } from "../lib/workspaceCodeSelection";
 import { useWorkspaceWorkbenchStore } from "../workspaceWorkbenchStore";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
@@ -186,6 +187,7 @@ function ChatThreadRouteView() {
   // unless remountDeps are configured, so this stays warm across thread switches.
   const [hasOpenedDiff, setHasOpenedDiff] = useState(diffOpen);
   const [hasOpenedWorkspace, setHasOpenedWorkspace] = useState(workspaceOpen);
+  const addCodeSelectionToPromptRef = useRef<((selection: CodeSelection) => void) | null>(null);
   const activeProject = projects.find(
     (project) => project.id === (activeThread?.projectId ?? activeDraftThread?.projectId),
   );
@@ -211,6 +213,15 @@ function ChatThreadRouteView() {
   const closeWorkspace = useCallback(() => {
     setWorkspaceOpen(false);
   }, [setWorkspaceOpen]);
+  const registerCodeSelectionPromptHandler = useCallback(
+    (handler: ((selection: CodeSelection) => void) | null) => {
+      addCodeSelectionToPromptRef.current = handler;
+    },
+    [],
+  );
+  const addCodeSelectionToPrompt = useCallback((selection: CodeSelection) => {
+    addCodeSelectionToPromptRef.current?.(selection);
+  }, []);
 
   useEffect(() => {
     if (diffOpen) {
@@ -250,7 +261,11 @@ function ChatThreadRouteView() {
     return (
       <>
         <SidebarInset className="h-dvh  min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-          <ChatView key={threadId} threadId={threadId} />
+          <ChatView
+            key={threadId}
+            threadId={threadId}
+            registerCodeSelectionPromptHandler={registerCodeSelectionPromptHandler}
+          />
         </SidebarInset>
         <WorkspaceWorkbenchSurface
           mobile={isMobile}
@@ -259,6 +274,7 @@ function ChatThreadRouteView() {
           workspaceRoot={workspaceRoot}
           onClose={closeWorkspace}
           renderContent={shouldRenderWorkspaceContent}
+          onAddCodeSelectionToPrompt={addCodeSelectionToPrompt}
         />
         <DiffPanelInlineSidebar
           diffOpen={diffOpen}
@@ -273,7 +289,11 @@ function ChatThreadRouteView() {
   return (
     <>
       <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-        <ChatView key={threadId} threadId={threadId} />
+        <ChatView
+          key={threadId}
+          threadId={threadId}
+          registerCodeSelectionPromptHandler={registerCodeSelectionPromptHandler}
+        />
       </SidebarInset>
       <WorkspaceWorkbenchSurface
         mobile={isMobile}
@@ -282,6 +302,7 @@ function ChatThreadRouteView() {
         workspaceRoot={workspaceRoot}
         onClose={closeWorkspace}
         renderContent={shouldRenderWorkspaceContent}
+        onAddCodeSelectionToPrompt={addCodeSelectionToPrompt}
       />
       <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
         {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
