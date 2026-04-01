@@ -378,6 +378,29 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("forwards workspace file reads to the websocket project method", async () => {
+    requestMock.mockResolvedValue({
+      relativePath: "src/index.ts",
+      contents: "export {};",
+      mtimeMs: 123,
+      sizeBytes: 10,
+      isBinary: false,
+      isTooLarge: false,
+    });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await api.projects.readFile({
+      cwd: "/tmp/project",
+      relativePath: "src/index.ts",
+    });
+
+    expect(requestMock).toHaveBeenCalledWith(WS_METHODS.projectsReadFile, {
+      cwd: "/tmp/project",
+      relativePath: "src/index.ts",
+    });
+  });
+
   it("uses no client timeout for git.runStackedAction", async () => {
     requestMock.mockResolvedValue({
       action: "commit",
