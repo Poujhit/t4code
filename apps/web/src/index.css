@@ -202,6 +202,69 @@ input {
   background: rgba(255, 255, 255, 0.18);
 }
 
+.workspace-editor-codemirror .cm-scroller {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+.dark .workspace-editor-codemirror .cm-scroller {
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.workspace-editor-codemirror .cm-scroller::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.workspace-editor-codemirror .cm-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.workspace-editor-codemirror .cm-gutters,
+.workspace-editor-codemirror .cm-gutter,
+.workspace-editor-codemirror .cm-lineNumbers,
+.workspace-editor-codemirror .cm-gutterElement,
+.workspace-editor-codemirror .cm-gutter-filler,
+.workspace-editor-codemirror .cm-activeLineGutter {
+  background: var(--color-neutral-900) !important;
+}
+
+.workspace-editor-codemirror .cm-gutters {
+  border-right-color: var(--color-neutral-900) !important;
+}
+
+.workspace-editor-codemirror .cm-selectionLayer .cm-selectionBackground,
+.workspace-editor-codemirror .cm-focused .cm-selectionLayer .cm-selectionBackground {
+  background: rgba(150, 168, 198, 0.24) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.workspace-editor-codemirror .cm-content::selection,
+.workspace-editor-codemirror .cm-content *::selection {
+  background: rgba(118, 161, 235, 0.24) !important;
+  border: none !important;
+  border-bottom: none !important;
+  color: inherit !important;
+}
+
+.workspace-editor-codemirror .cm-scroller::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+.workspace-editor-codemirror .cm-scroller::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.dark .workspace-editor-codemirror .cm-scroller::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dark .workspace-editor-codemirror .cm-scroller::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
 .turn-chip-strip {
   scrollbar-width: none;
   -ms-overflow-style: none;
