@@ -1,8 +1,9 @@
 import { Schema } from "effect";
-import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas";
+import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas";
 
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_LIST_DIRECTORY_MAX_PATH_LENGTH = 512;
+const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
 
 export const ProjectSearchEntriesInput = Schema.Struct({
@@ -49,10 +50,27 @@ export const ProjectListDirectoryResult = Schema.Struct({
 });
 export type ProjectListDirectoryResult = typeof ProjectListDirectoryResult.Type;
 
+export const ProjectReadFileInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_READ_FILE_PATH_MAX_LENGTH)),
+});
+export type ProjectReadFileInput = typeof ProjectReadFileInput.Type;
+
+export const ProjectReadFileResult = Schema.Struct({
+  relativePath: TrimmedNonEmptyString,
+  contents: Schema.String,
+  mtimeMs: Schema.Number,
+  sizeBytes: NonNegativeInt,
+  isBinary: Schema.Boolean,
+  isTooLarge: Schema.Boolean,
+});
+export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
+
 export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),
   contents: Schema.String,
+  expectedMtimeMs: Schema.optional(Schema.NullOr(Schema.Number)),
 });
 export type ProjectWriteFileInput = typeof ProjectWriteFileInput.Type;
 

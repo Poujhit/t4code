@@ -107,6 +107,38 @@ it.effect("rejects projects.listDirectory requests with an empty relative path s
   }),
 );
 
+it.effect("accepts projects.readFile requests", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeWebSocketRequest({
+      id: "req-file-1",
+      body: {
+        _tag: WS_METHODS.projectsReadFile,
+        cwd: "/repo",
+        relativePath: "src/index.ts",
+      },
+    });
+
+    assert.strictEqual(parsed.body._tag, WS_METHODS.projectsReadFile);
+  }),
+);
+
+it.effect("rejects projects.readFile requests with an empty relative path string", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeWebSocketRequest({
+        id: "req-file-2",
+        body: {
+          _tag: WS_METHODS.projectsReadFile,
+          cwd: "/repo",
+          relativePath: "   ",
+        },
+      }),
+    );
+
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
 it.effect("accepts typed websocket push envelopes with sequence", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeWsResponse({
