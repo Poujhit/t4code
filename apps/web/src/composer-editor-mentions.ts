@@ -2,6 +2,7 @@ import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   type TerminalContextDraft,
 } from "./lib/terminalContext";
+import { selectionMention } from "./lib/workspaceCodeSelection";
 
 export type ComposerPromptSegment =
   | {
@@ -11,6 +12,9 @@ export type ComposerPromptSegment =
   | {
       type: "mention";
       path: string;
+      tokenText: string;
+      lineStart?: number;
+      lineEnd?: number;
     }
   | {
       type: "terminal-context";
@@ -18,6 +22,39 @@ export type ComposerPromptSegment =
     };
 
 const MENTION_TOKEN_REGEX = /(^|\s)@([^\s@]+)(?=\s)/g;
+
+function parseMentionToken(tokenText: string): {
+  path: string;
+  tokenText: string;
+  lineStart?: number;
+  lineEnd?: number;
+} {
+  const normalizedToken = tokenText.startsWith("@") ? tokenText.slice(1) : tokenText;
+  const lineRefMatch = /^(.*)#L(\d+)(?:-(\d+))?$/.exec(normalizedToken);
+  if (!lineRefMatch) {
+    return {
+      path: normalizedToken,
+      tokenText: `@${normalizedToken}`,
+    };
+  }
+
+  const path = lineRefMatch[1] ?? normalizedToken;
+  const startLine = Number.parseInt(lineRefMatch[2] ?? "", 10);
+  const endLine = Number.parseInt(lineRefMatch[3] ?? lineRefMatch[2] ?? "", 10);
+  if (!path || !Number.isFinite(startLine) || !Number.isFinite(endLine)) {
+    return {
+      path: normalizedToken,
+      tokenText: `@${normalizedToken}`,
+    };
+  }
+
+  return {
+    path,
+    tokenText: selectionMention({ relativePath: path, startLine, endLine }),
+    lineStart: startLine,
+    lineEnd: endLine,
+  };
+}
 
 function pushTextSegment(segments: ComposerPromptSegment[], text: string): void {
   if (!text) return;
@@ -39,7 +76,7 @@ function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegmen
   for (const match of text.matchAll(MENTION_TOKEN_REGEX)) {
     const fullMatch = match[0];
     const prefix = match[1] ?? "";
-    const path = match[2] ?? "";
+    const rawToken = match[2] ?? "";
     const matchIndex = match.index ?? 0;
     const mentionStart = matchIndex + prefix.length;
     const mentionEnd = mentionStart + fullMatch.length - prefix.length;
@@ -48,8 +85,8 @@ function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegmen
       pushTextSegment(segments, text.slice(cursor, mentionStart));
     }
 
-    if (path.length > 0) {
-      segments.push({ type: "mention", path });
+    if (rawToken.length > 0) {
+      segments.push({ type: "mention", ...parseMentionToken(`@${rawToken}`) });
     } else {
       pushTextSegment(segments, text.slice(mentionStart, mentionEnd));
     }

@@ -13,7 +13,10 @@ export interface ComposerTrigger {
 
 const SLASH_COMMANDS: readonly ComposerSlashCommand[] = ["model", "plan", "default"];
 const isInlineTokenSegment = (
-  segment: { type: "text"; text: string } | { type: "mention" } | { type: "terminal-context" },
+  segment:
+    | { type: "text"; text: string }
+    | { type: "mention"; tokenText: string }
+    | { type: "terminal-context" },
 ): boolean => segment.type !== "text";
 
 function clampCursor(text: string, cursor: number): number {
@@ -51,7 +54,7 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
 
   for (const segment of segments) {
     if (segment.type === "mention") {
-      const expandedLength = segment.path.length + 1;
+      const expandedLength = segment.tokenText.length;
       if (remaining <= 1) {
         return expandedCursor + (remaining === 0 ? 0 : expandedLength);
       }
@@ -80,7 +83,10 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
 }
 
 function collapsedSegmentLength(
-  segment: { type: "text"; text: string } | { type: "mention" } | { type: "terminal-context" },
+  segment:
+    | { type: "text"; text: string }
+    | { type: "mention"; tokenText: string }
+    | { type: "terminal-context" },
 ): number {
   if (segment.type === "text") {
     return segment.text.length;
@@ -90,7 +96,9 @@ function collapsedSegmentLength(
 
 function clampCollapsedComposerCursorForSegments(
   segments: ReadonlyArray<
-    { type: "text"; text: string } | { type: "mention" } | { type: "terminal-context" }
+    | { type: "text"; text: string }
+    | { type: "mention"; tokenText: string }
+    | { type: "terminal-context" }
   >,
   cursorInput: number,
 ): number {
@@ -123,7 +131,7 @@ export function collapseExpandedComposerCursor(text: string, cursorInput: number
 
   for (const segment of segments) {
     if (segment.type === "mention") {
-      const expandedLength = segment.path.length + 1;
+      const expandedLength = segment.tokenText.length;
       if (remaining === 0) {
         return collapsedCursor;
       }
