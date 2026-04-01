@@ -1688,6 +1688,55 @@ describe("WebSocket Server", () => {
     );
   });
 
+  it("supports projects.readFile within the workspace root", async () => {
+    const workspace = makeTempDir("t3code-ws-read-file-");
+    fs.mkdirSync(path.join(workspace, "src"), { recursive: true });
+    fs.writeFileSync(path.join(workspace, "src", "index.ts"), "export {};\n", "utf8");
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.projectsReadFile, {
+      cwd: workspace,
+      relativePath: "src/index.ts",
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({
+      relativePath: "src/index.ts",
+      contents: "export {};\n",
+      mtimeMs: expect.any(Number),
+      sizeBytes: "export {};\n".length,
+      isBinary: false,
+      isTooLarge: false,
+    });
+  });
+
+  it("rejects projects.readFile paths outside the workspace root", async () => {
+    const workspace = makeTempDir("t3code-ws-read-file-reject-");
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.projectsReadFile, {
+      cwd: workspace,
+      relativePath: "../escape.md",
+    });
+
+    expect(response.result).toBeUndefined();
+    expect(response.error?.message).toContain(
+      "Workspace file path must stay within the project root.",
+    );
+  });
+
   it("rejects projects.writeFile paths outside the workspace root", async () => {
     const workspace = makeTempDir("t3code-ws-write-file-reject-");
 
@@ -1709,6 +1758,34 @@ describe("WebSocket Server", () => {
       "Workspace file path must stay within the project root.",
     );
     expect(fs.existsSync(path.join(workspace, "..", "escape.md"))).toBe(false);
+  });
+
+  it("rejects stale projects.writeFile updates when the file changed on disk", async () => {
+    const workspace = makeTempDir("t3code-ws-write-file-conflict-");
+    const absolutePath = path.join(workspace, "notes.md");
+    fs.writeFileSync(absolutePath, "first\n", "utf8");
+    const originalMtimeMs = fs.statSync(absolutePath).mtimeMs;
+    fs.writeFileSync(absolutePath, "second\n", "utf8");
+    const updatedTime = new Date(originalMtimeMs + 5_000);
+    fs.utimesSync(absolutePath, updatedTime, updatedTime);
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.projectsWriteFile, {
+      cwd: workspace,
+      relativePath: "notes.md",
+      contents: "third\n",
+      expectedMtimeMs: originalMtimeMs,
+    });
+
+    expect(response.result).toBeUndefined();
+    expect(response.error?.message).toContain("changed on disk since it was opened");
+    expect(fs.readFileSync(absolutePath, "utf8")).toBe("second\n");
   });
 
   it("routes git core methods over websocket", async () => {
