@@ -6,12 +6,15 @@ let cachedApi: NativeApi | undefined;
 
 export function readNativeApi(): NativeApi | undefined {
   if (typeof window === "undefined") return undefined;
-  if (cachedApi) return cachedApi;
-
   if (window.nativeApi) {
+    if (cachedApi === window.nativeApi) {
+      return cachedApi;
+    }
     cachedApi = window.nativeApi;
     return cachedApi;
   }
+
+  if (cachedApi) return cachedApi;
 
   cachedApi = createWsNativeApi();
   return cachedApi;
