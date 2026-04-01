@@ -22,7 +22,7 @@ export function WorkspaceTreeNode(props: {
   const selectedPath = useWorkspaceWorkbenchStore(
     (state) => selectWorkspaceThreadState(state.threadStateByThreadId, props.threadId).selectedPath,
   );
-  const setSelectedPath = useWorkspaceWorkbenchStore((state) => state.setSelectedPath);
+  const openFile = useWorkspaceWorkbenchStore((state) => state.openFile);
   const setDirectoryExpanded = useWorkspaceWorkbenchStore((state) => state.setDirectoryExpanded);
   const childrenQuery = useQuery(
     projectListDirectoryQueryOptions({
@@ -48,7 +48,7 @@ export function WorkspaceTreeNode(props: {
             setDirectoryExpanded(props.threadId, props.entry.path, !expanded);
             return;
           }
-          setSelectedPath(props.threadId, props.entry.path);
+          openFile(props.threadId, props.entry.path);
         }}
       >
         <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">

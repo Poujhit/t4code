@@ -8,17 +8,47 @@ interface WorkspaceThreadState {
   expandedDirectoryPaths: string[];
 }
 
+export interface WorkspaceFileErrorState {
+  kind: "missing" | "unreadable" | "conflict";
+  message: string;
+}
+
 interface WorkspaceWorkbenchStoreState {
   isWorkspaceOpen: boolean;
   workspacePaneWidth: number;
   threadStateByThreadId: Record<ThreadId, WorkspaceThreadState>;
+  openFilePathsByThreadId: Record<ThreadId, string[]>;
+  activeFilePathByThreadId: Record<ThreadId, string | null>;
+  draftContentByThreadIdAndPath: Record<string, string>;
+  baseMtimeMsByThreadIdAndPath: Record<string, number>;
+  isDirtyByThreadIdAndPath: Record<string, boolean>;
+  lastLoadErrorByThreadIdAndPath: Record<string, WorkspaceFileErrorState>;
   setWorkspaceOpen: (open: boolean) => void;
   toggleWorkspaceOpen: () => void;
   setWorkspacePaneWidth: (width: number) => void;
   clampWorkspacePaneWidthToViewport: () => void;
   syncThreadRoot: (threadId: ThreadId, rootPath: string | null) => void;
   setSelectedPath: (threadId: ThreadId, path: string | null) => void;
+  setActiveFilePath: (threadId: ThreadId, path: string | null) => void;
+  openFile: (threadId: ThreadId, path: string) => void;
+  closeFile: (threadId: ThreadId, path: string) => void;
   setDirectoryExpanded: (threadId: ThreadId, path: string, expanded: boolean) => void;
+  hydrateFileDraft: (
+    threadId: ThreadId,
+    path: string,
+    input: { contents: string; mtimeMs: number },
+  ) => void;
+  setDraftContent: (
+    threadId: ThreadId,
+    path: string,
+    input: { contents: string; baseContents: string },
+  ) => void;
+  markFileSaved: (
+    threadId: ThreadId,
+    path: string,
+    input: { contents: string; mtimeMs: number },
+  ) => void;
+  setFileError: (threadId: ThreadId, path: string, error: WorkspaceFileErrorState | null) => void;
   clearThreadState: (threadId: ThreadId) => void;
 }
 
@@ -42,6 +72,57 @@ function copyThreadState(state: WorkspaceThreadState): WorkspaceThreadState {
   };
 }
 
+export function workspaceFileStateKey(threadId: ThreadId, path: string): string {
+  return `${threadId}\u0000${path}`;
+}
+
+function clearThreadScopedRecord<T>(
+  record: Record<string, T>,
+  threadId: ThreadId,
+): Record<string, T> {
+  const prefix = `${threadId}\u0000`;
+  let changed = false;
+  const nextEntries = Object.entries(record).filter(([key]) => {
+    if (!key.startsWith(prefix)) {
+      return true;
+    }
+    changed = true;
+    return false;
+  });
+  return changed ? Object.fromEntries(nextEntries) : record;
+}
+
+function setThreadScopedValue<T>(
+  record: Record<string, T>,
+  threadId: ThreadId,
+  path: string,
+  value: T,
+): Record<string, T> {
+  const key = workspaceFileStateKey(threadId, path);
+  return record[key] === value ? record : { ...record, [key]: value };
+}
+
+function deleteThreadScopedValue<T>(
+  record: Record<string, T>,
+  threadId: ThreadId,
+  path: string,
+): Record<string, T> {
+  const key = workspaceFileStateKey(threadId, path);
+  if (!Object.hasOwn(record, key)) {
+    return record;
+  }
+  const { [key]: _removed, ...rest } = record;
+  return rest;
+}
+
+function deleteThreadValue<T>(record: Record<string, T>, threadId: ThreadId): Record<string, T> {
+  if (!Object.hasOwn(record, threadId)) {
+    return record;
+  }
+  const { [threadId]: _removed, ...rest } = record;
+  return rest as Record<string, T>;
+}
+
 export function selectWorkspaceThreadState(
   threadStateByThreadId: Record<ThreadId, WorkspaceThreadState>,
   threadId: ThreadId,
@@ -53,6 +134,13 @@ function uniqueSortedPaths(paths: readonly string[]): string[] {
   return [...new Set(paths.filter((path) => path.trim().length > 0))].toSorted((a, b) =>
     a.localeCompare(b),
   );
+}
+
+function appendUniquePath(paths: string[], path: string): string[] {
+  if (path.trim().length === 0 || paths.includes(path)) {
+    return paths;
+  }
+  return [...paths, path];
 }
 
 function normalizeThreadState(state: WorkspaceThreadState): WorkspaceThreadState {
@@ -140,6 +228,12 @@ export function partializeWorkspaceWorkbenchState(state: WorkspaceWorkbenchStore
     isWorkspaceOpen: state.isWorkspaceOpen,
     workspacePaneWidth: state.workspacePaneWidth,
     threadStateByThreadId: state.threadStateByThreadId,
+    openFilePathsByThreadId: state.openFilePathsByThreadId,
+    activeFilePathByThreadId: state.activeFilePathByThreadId,
+    draftContentByThreadIdAndPath: state.draftContentByThreadIdAndPath,
+    baseMtimeMsByThreadIdAndPath: state.baseMtimeMsByThreadIdAndPath,
+    isDirtyByThreadIdAndPath: state.isDirtyByThreadIdAndPath,
+    lastLoadErrorByThreadIdAndPath: state.lastLoadErrorByThreadIdAndPath,
   };
 }
 
@@ -149,6 +243,12 @@ export const useWorkspaceWorkbenchStore = create<WorkspaceWorkbenchStoreState>()
       isWorkspaceOpen: false,
       workspacePaneWidth: WORKSPACE_INLINE_DEFAULT_WIDTH,
       threadStateByThreadId: {},
+      openFilePathsByThreadId: {},
+      activeFilePathByThreadId: {},
+      draftContentByThreadIdAndPath: {},
+      baseMtimeMsByThreadIdAndPath: {},
+      isDirtyByThreadIdAndPath: {},
+      lastLoadErrorByThreadIdAndPath: {},
       setWorkspaceOpen: (open) =>
         set((state) => (state.isWorkspaceOpen === open ? state : { isWorkspaceOpen: open })),
       toggleWorkspaceOpen: () => set((state) => ({ isWorkspaceOpen: !state.isWorkspaceOpen })),
@@ -163,22 +263,44 @@ export const useWorkspaceWorkbenchStore = create<WorkspaceWorkbenchStoreState>()
           return state.workspacePaneWidth === nextWidth ? state : { workspacePaneWidth: nextWidth };
         }),
       syncThreadRoot: (threadId, rootPath) =>
-        set((state) => ({
-          threadStateByThreadId: updateThreadStateByThreadId(
+        set((state) => {
+          const currentThreadState = selectWorkspaceThreadState(
             state.threadStateByThreadId,
             threadId,
-            (current) => {
-              if (current.rootPath === rootPath) {
-                return current;
-              }
-              return {
+          );
+          if (currentThreadState.rootPath === rootPath) {
+            return state;
+          }
+          return {
+            threadStateByThreadId: updateThreadStateByThreadId(
+              state.threadStateByThreadId,
+              threadId,
+              () => ({
                 rootPath,
                 selectedPath: null,
                 expandedDirectoryPaths: [],
-              };
-            },
-          ),
-        })),
+              }),
+            ),
+            openFilePathsByThreadId: deleteThreadValue(state.openFilePathsByThreadId, threadId),
+            activeFilePathByThreadId: deleteThreadValue(state.activeFilePathByThreadId, threadId),
+            draftContentByThreadIdAndPath: clearThreadScopedRecord(
+              state.draftContentByThreadIdAndPath,
+              threadId,
+            ),
+            baseMtimeMsByThreadIdAndPath: clearThreadScopedRecord(
+              state.baseMtimeMsByThreadIdAndPath,
+              threadId,
+            ),
+            isDirtyByThreadIdAndPath: clearThreadScopedRecord(
+              state.isDirtyByThreadIdAndPath,
+              threadId,
+            ),
+            lastLoadErrorByThreadIdAndPath: clearThreadScopedRecord(
+              state.lastLoadErrorByThreadIdAndPath,
+              threadId,
+            ),
+          };
+        }),
       setSelectedPath: (threadId, path) =>
         set((state) => ({
           threadStateByThreadId: updateThreadStateByThreadId(
@@ -190,6 +312,70 @@ export const useWorkspaceWorkbenchStore = create<WorkspaceWorkbenchStoreState>()
             }),
           ),
         })),
+      setActiveFilePath: (threadId, path) =>
+        set((state) => ({
+          activeFilePathByThreadId:
+            state.activeFilePathByThreadId[threadId] === path
+              ? state.activeFilePathByThreadId
+              : { ...state.activeFilePathByThreadId, [threadId]: path },
+        })),
+      openFile: (threadId, path) =>
+        set((state) => {
+          const currentOpenFilePaths = state.openFilePathsByThreadId[threadId] ?? [];
+          const nextOpenFilePaths = appendUniquePath(currentOpenFilePaths, path);
+          return {
+            threadStateByThreadId: updateThreadStateByThreadId(
+              state.threadStateByThreadId,
+              threadId,
+              (current) => ({
+                ...copyThreadState(current),
+                selectedPath: path,
+              }),
+            ),
+            openFilePathsByThreadId:
+              nextOpenFilePaths === currentOpenFilePaths
+                ? state.openFilePathsByThreadId
+                : { ...state.openFilePathsByThreadId, [threadId]: nextOpenFilePaths },
+            activeFilePathByThreadId:
+              state.activeFilePathByThreadId[threadId] === path
+                ? state.activeFilePathByThreadId
+                : { ...state.activeFilePathByThreadId, [threadId]: path },
+          };
+        }),
+      closeFile: (threadId, path) =>
+        set((state) => {
+          const openFilePaths = state.openFilePathsByThreadId[threadId] ?? [];
+          const closeIndex = openFilePaths.indexOf(path);
+          if (closeIndex === -1) {
+            return state;
+          }
+
+          const nextOpenFilePaths = openFilePaths.filter((entry) => entry !== path);
+          const activeFilePath = state.activeFilePathByThreadId[threadId] ?? null;
+          const nextActiveFilePath =
+            activeFilePath !== path
+              ? activeFilePath
+              : (nextOpenFilePaths[closeIndex] ?? nextOpenFilePaths[closeIndex - 1] ?? null);
+
+          return {
+            threadStateByThreadId: updateThreadStateByThreadId(
+              state.threadStateByThreadId,
+              threadId,
+              (current) => ({
+                ...copyThreadState(current),
+                selectedPath: activeFilePath === path ? nextActiveFilePath : current.selectedPath,
+              }),
+            ),
+            openFilePathsByThreadId:
+              nextOpenFilePaths.length === 0
+                ? deleteThreadValue(state.openFilePathsByThreadId, threadId)
+                : { ...state.openFilePathsByThreadId, [threadId]: nextOpenFilePaths },
+            activeFilePathByThreadId:
+              nextActiveFilePath === null
+                ? deleteThreadValue(state.activeFilePathByThreadId, threadId)
+                : { ...state.activeFilePathByThreadId, [threadId]: nextActiveFilePath },
+          };
+        }),
       setDirectoryExpanded: (threadId, path, expanded) =>
         set((state) => ({
           threadStateByThreadId: updateThreadStateByThreadId(
@@ -203,12 +389,110 @@ export const useWorkspaceWorkbenchStore = create<WorkspaceWorkbenchStoreState>()
             }),
           ),
         })),
+      hydrateFileDraft: (threadId, path, input) =>
+        set((state) => {
+          const key = workspaceFileStateKey(threadId, path);
+          if (state.isDirtyByThreadIdAndPath[key]) {
+            return state;
+          }
+          return {
+            draftContentByThreadIdAndPath: setThreadScopedValue(
+              state.draftContentByThreadIdAndPath,
+              threadId,
+              path,
+              input.contents,
+            ),
+            baseMtimeMsByThreadIdAndPath: setThreadScopedValue(
+              state.baseMtimeMsByThreadIdAndPath,
+              threadId,
+              path,
+              input.mtimeMs,
+            ),
+            isDirtyByThreadIdAndPath: deleteThreadScopedValue(
+              state.isDirtyByThreadIdAndPath,
+              threadId,
+              path,
+            ),
+            lastLoadErrorByThreadIdAndPath: deleteThreadScopedValue(
+              state.lastLoadErrorByThreadIdAndPath,
+              threadId,
+              path,
+            ),
+          };
+        }),
+      setDraftContent: (threadId, path, input) =>
+        set((state) => {
+          const isDirty = input.contents !== input.baseContents;
+          return {
+            draftContentByThreadIdAndPath: setThreadScopedValue(
+              state.draftContentByThreadIdAndPath,
+              threadId,
+              path,
+              input.contents,
+            ),
+            isDirtyByThreadIdAndPath: isDirty
+              ? setThreadScopedValue(state.isDirtyByThreadIdAndPath, threadId, path, true)
+              : deleteThreadScopedValue(state.isDirtyByThreadIdAndPath, threadId, path),
+          };
+        }),
+      markFileSaved: (threadId, path, input) =>
+        set((state) => ({
+          draftContentByThreadIdAndPath: setThreadScopedValue(
+            state.draftContentByThreadIdAndPath,
+            threadId,
+            path,
+            input.contents,
+          ),
+          baseMtimeMsByThreadIdAndPath: setThreadScopedValue(
+            state.baseMtimeMsByThreadIdAndPath,
+            threadId,
+            path,
+            input.mtimeMs,
+          ),
+          isDirtyByThreadIdAndPath: deleteThreadScopedValue(
+            state.isDirtyByThreadIdAndPath,
+            threadId,
+            path,
+          ),
+          lastLoadErrorByThreadIdAndPath: deleteThreadScopedValue(
+            state.lastLoadErrorByThreadIdAndPath,
+            threadId,
+            path,
+          ),
+        })),
+      setFileError: (threadId, path, error) =>
+        set((state) => ({
+          lastLoadErrorByThreadIdAndPath:
+            error === null
+              ? deleteThreadScopedValue(state.lastLoadErrorByThreadIdAndPath, threadId, path)
+              : setThreadScopedValue(state.lastLoadErrorByThreadIdAndPath, threadId, path, error),
+        })),
       clearThreadState: (threadId) =>
         set((state) => ({
           threadStateByThreadId: updateThreadStateByThreadId(
             state.threadStateByThreadId,
             threadId,
             () => copyThreadState(DEFAULT_THREAD_STATE),
+          ),
+          openFilePathsByThreadId: deleteThreadValue(state.openFilePathsByThreadId, threadId),
+          activeFilePathByThreadId: Object.fromEntries(
+            Object.entries(state.activeFilePathByThreadId).filter(([key]) => key !== threadId),
+          ) as Record<ThreadId, string | null>,
+          draftContentByThreadIdAndPath: clearThreadScopedRecord(
+            state.draftContentByThreadIdAndPath,
+            threadId,
+          ),
+          baseMtimeMsByThreadIdAndPath: clearThreadScopedRecord(
+            state.baseMtimeMsByThreadIdAndPath,
+            threadId,
+          ),
+          isDirtyByThreadIdAndPath: clearThreadScopedRecord(
+            state.isDirtyByThreadIdAndPath,
+            threadId,
+          ),
+          lastLoadErrorByThreadIdAndPath: clearThreadScopedRecord(
+            state.lastLoadErrorByThreadIdAndPath,
+            threadId,
           ),
         })),
     }),
