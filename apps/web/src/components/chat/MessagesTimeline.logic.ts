@@ -27,3 +27,35 @@ export function computeMessageDurationStart(
 export function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
 }
+
+interface ChangedFileLike {
+  path: string;
+}
+
+export function defaultChangedFilePath(files: ReadonlyArray<ChangedFileLike>): string | null {
+  return files[0]?.path ?? null;
+}
+
+export function resolveSelectedChangedFilePath(input: {
+  turnId: string;
+  files: ReadonlyArray<ChangedFileLike>;
+  selectedFileByTurnId: Record<string, string>;
+  activeDiffTurnId?: string | null;
+  activeDiffFilePath?: string | null;
+}): string | null {
+  const paths = new Set(input.files.map((file) => file.path));
+  const selectedFile = input.selectedFileByTurnId[input.turnId];
+  if (selectedFile && paths.has(selectedFile)) {
+    return selectedFile;
+  }
+
+  if (
+    input.activeDiffTurnId === input.turnId &&
+    input.activeDiffFilePath &&
+    paths.has(input.activeDiffFilePath)
+  ) {
+    return input.activeDiffFilePath;
+  }
+
+  return defaultChangedFilePath(input.files);
+}

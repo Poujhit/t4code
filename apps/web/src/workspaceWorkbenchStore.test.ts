@@ -165,6 +165,48 @@ describe("workspaceWorkbenchStore", () => {
     ).toBe("src/index.ts");
   });
 
+  it("reveals a file by opening it, selecting it, and expanding ancestor directories", () => {
+    const store = useWorkspaceWorkbenchStore.getState();
+
+    store.syncThreadRoot(THREAD_ID, "/repo");
+    store.revealFile(THREAD_ID, "src/lib/utils/index.ts");
+
+    expect(useWorkspaceWorkbenchStore.getState().openFilePathsByThreadId[THREAD_ID]).toEqual([
+      "src/lib/utils/index.ts",
+    ]);
+    expect(useWorkspaceWorkbenchStore.getState().activeFilePathByThreadId[THREAD_ID]).toBe(
+      "src/lib/utils/index.ts",
+    );
+    expect(
+      selectWorkspaceThreadState(
+        useWorkspaceWorkbenchStore.getState().threadStateByThreadId,
+        THREAD_ID,
+      ),
+    ).toEqual({
+      rootPath: "/repo",
+      selectedPath: "src/lib/utils/index.ts",
+      expandedDirectoryPaths: ["src", "src/lib", "src/lib/utils"],
+    });
+  });
+
+  it("does not duplicate tabs when revealing an already open file", () => {
+    const store = useWorkspaceWorkbenchStore.getState();
+
+    store.syncThreadRoot(THREAD_ID, "/repo");
+    store.openFile(THREAD_ID, "src/index.ts");
+    store.revealFile(THREAD_ID, "src/index.ts");
+
+    expect(useWorkspaceWorkbenchStore.getState().openFilePathsByThreadId[THREAD_ID]).toEqual([
+      "src/index.ts",
+    ]);
+    expect(
+      selectWorkspaceThreadState(
+        useWorkspaceWorkbenchStore.getState().threadStateByThreadId,
+        THREAD_ID,
+      ).expandedDirectoryPaths,
+    ).toEqual(["src"]);
+  });
+
   it("closes inactive tabs without changing the active file", () => {
     const store = useWorkspaceWorkbenchStore.getState();
 

@@ -12,9 +12,17 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
   files: ReadonlyArray<TurnDiffFileChange>;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
-  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  selectedFilePath: string | null;
+  onSelectChangedFile: (turnId: TurnId, filePath: string) => void;
 }) {
-  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId } = props;
+  const {
+    files,
+    allDirectoriesExpanded,
+    onSelectChangedFile,
+    resolvedTheme,
+    selectedFilePath,
+    turnId,
+  } = props;
   const treeNodes = useMemo(() => buildTurnDiffTree(files), [files]);
   const directoryPathsKey = useMemo(
     () => collectDirectoryPaths(treeNodes).join("\u0000"),
@@ -88,18 +96,30 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
       <button
         key={`file:${node.path}`}
         type="button"
-        className="group flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80"
+        className={cn(
+          "group flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80",
+          selectedFilePath === node.path && "bg-background/80 ring-1 ring-border/70",
+        )}
         style={{ paddingLeft: `${leftPadding}px` }}
-        onClick={() => onOpenTurnDiff(turnId, node.path)}
+        aria-pressed={selectedFilePath === node.path}
+        onClick={() => onSelectChangedFile(turnId, node.path)}
       >
         <span aria-hidden="true" className="size-3.5 shrink-0" />
         <VscodeEntryIcon
           pathValue={node.path}
           kind="file"
           theme={resolvedTheme}
-          className="size-3.5 text-muted-foreground/70"
+          className={cn(
+            "size-3.5 text-muted-foreground/70",
+            selectedFilePath === node.path && "text-foreground",
+          )}
         />
-        <span className="truncate font-mono text-[11px] text-muted-foreground/80 group-hover:text-foreground/90">
+        <span
+          className={cn(
+            "truncate font-mono text-[11px] text-muted-foreground/80 group-hover:text-foreground/90",
+            selectedFilePath === node.path && "text-foreground",
+          )}
+        >
           {node.name}
         </span>
         {node.stat && (

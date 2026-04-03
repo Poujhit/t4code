@@ -180,6 +180,8 @@ import {
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useWorkspaceWorkbenchStore } from "~/workspaceWorkbenchStore";
+import { openInPreferredEditor } from "../editorPreferences";
+import { resolvePathLinkTarget } from "../terminal-links";
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -412,7 +414,9 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
     selectThreadTerminalState(state.terminalStateByThreadId, threadId),
   );
   const workspaceOpen = useWorkspaceWorkbenchStore((state) => state.isWorkspaceOpen);
+  const setWorkspaceOpen = useWorkspaceWorkbenchStore((state) => state.setWorkspaceOpen);
   const toggleWorkspaceOpen = useWorkspaceWorkbenchStore((state) => state.toggleWorkspaceOpen);
+  const revealWorkspaceFile = useWorkspaceWorkbenchStore((state) => state.revealFile);
   const storeSetTerminalOpen = useTerminalStateStore((s) => s.setTerminalOpen);
   const storeSetTerminalHeight = useTerminalStateStore((s) => s.setTerminalHeight);
   const storeSplitTerminal = useTerminalStateStore((s) => s.splitTerminal);
@@ -3531,20 +3535,40 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
     setExpandedImage(preview);
   }, []);
   const expandedImageItem = expandedImage ? expandedImage.images[expandedImage.index] : null;
-  const onOpenTurnDiff = useCallback(
-    (turnId: TurnId, filePath?: string) => {
+  const onSelectChangedFile = useCallback(
+    (turnId: TurnId, filePath: string) => {
+      if (gitCwd) {
+        setWorkspaceOpen(true);
+        revealWorkspaceFile(threadId, filePath);
+      }
       void navigate({
         to: "/$threadId",
         params: { threadId },
         search: (previous) => {
           const rest = stripDiffSearchParams(previous);
-          return filePath
-            ? { ...rest, diff: "1", diffTurnId: turnId, diffFilePath: filePath }
-            : { ...rest, diff: "1", diffTurnId: turnId };
+          return { ...rest, diff: "1", diffTurnId: turnId, diffFilePath: filePath };
         },
       });
     },
-    [navigate, threadId],
+    [gitCwd, navigate, revealWorkspaceFile, setWorkspaceOpen, threadId],
+  );
+  const onOpenChangedFileInCodeEditor = useCallback(
+    (_turnId: TurnId, filePath: string) => {
+      if (!gitCwd) {
+        return;
+      }
+
+      const api = readNativeApi();
+      if (!api) {
+        return;
+      }
+
+      const targetPath = resolvePathLinkTarget(filePath, gitCwd);
+      void openInPreferredEditor(api, targetPath).catch((error) => {
+        console.warn("Failed to open changed file in code editor.", error);
+      });
+    },
+    [gitCwd],
   );
   const onRevertUserMessage = (messageId: MessageId) => {
     const targetTurnCount = revertTurnCountByUserMessageId.get(messageId);
@@ -3662,7 +3686,8 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
                 nowIso={nowIso}
                 expandedWorkGroups={expandedWorkGroups}
                 onToggleWorkGroup={onToggleWorkGroup}
-                onOpenTurnDiff={onOpenTurnDiff}
+                onSelectChangedFile={onSelectChangedFile}
+                onOpenChangedFileInCodeEditor={onOpenChangedFileInCodeEditor}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
@@ -3670,7 +3695,9 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
                 markdownCwd={gitCwd ?? undefined}
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
-                workspaceRoot={activeProject?.cwd ?? undefined}
+                workspaceRoot={gitCwd ?? undefined}
+                selectedDiffTurnId={rawSearch.diffTurnId ?? null}
+                selectedDiffFilePath={rawSearch.diffFilePath ?? null}
               />
             </div>
 

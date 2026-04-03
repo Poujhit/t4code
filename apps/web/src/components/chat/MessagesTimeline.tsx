@@ -24,6 +24,7 @@ import {
   CheckIcon,
   CircleAlertIcon,
   EyeIcon,
+  ExternalLinkIcon,
   GlobeIcon,
   HammerIcon,
   type LucideIcon,
@@ -41,7 +42,11 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
-import { computeMessageDurationStart, normalizeCompactToolLabel } from "./MessagesTimeline.logic";
+import {
+  computeMessageDurationStart,
+  resolveSelectedChangedFilePath,
+  normalizeCompactToolLabel,
+} from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import {
   deriveDisplayedUserMessageState,
@@ -72,7 +77,8 @@ interface MessagesTimelineProps {
   nowIso: string;
   expandedWorkGroups: Record<string, boolean>;
   onToggleWorkGroup: (groupId: string) => void;
-  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onSelectChangedFile: (turnId: TurnId, filePath: string) => void;
+  onOpenChangedFileInCodeEditor: (turnId: TurnId, filePath: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
@@ -81,6 +87,8 @@ interface MessagesTimelineProps {
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
+  selectedDiffTurnId: TurnId | null;
+  selectedDiffFilePath: string | null;
 }
 
 export const MessagesTimeline = memo(function MessagesTimeline({
@@ -96,7 +104,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   nowIso,
   expandedWorkGroups,
   onToggleWorkGroup,
-  onOpenTurnDiff,
+  onSelectChangedFile,
+  onOpenChangedFileInCodeEditor,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
   isRevertingCheckpoint,
@@ -105,6 +114,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   resolvedTheme,
   timestampFormat,
   workspaceRoot,
+  selectedDiffTurnId,
+  selectedDiffFilePath,
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
@@ -296,12 +307,31 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [allDirectoriesExpandedByTurnId, setAllDirectoriesExpandedByTurnId] = useState<
     Record<string, boolean>
   >({});
+  const [selectedFileByTurnId, setSelectedFileByTurnId] = useState<Record<string, string>>({});
   const onToggleAllDirectories = useCallback((turnId: TurnId) => {
     setAllDirectoriesExpandedByTurnId((current) => ({
       ...current,
       [turnId]: !(current[turnId] ?? true),
     }));
   }, []);
+  const selectFile = useCallback(
+    (turnId: TurnId, filePath: string) => {
+      setSelectedFileByTurnId((current) =>
+        current[turnId] === filePath ? current : { ...current, [turnId]: filePath },
+      );
+      onSelectChangedFile(turnId, filePath);
+    },
+    [onSelectChangedFile],
+  );
+  const openFileInEditor = useCallback(
+    (turnId: TurnId, filePath: string) => {
+      setSelectedFileByTurnId((current) =>
+        current[turnId] === filePath ? current : { ...current, [turnId]: filePath },
+      );
+      onOpenChangedFileInCodeEditor(turnId, filePath);
+    },
+    [onOpenChangedFileInCodeEditor],
+  );
 
   const renderRowContent = (row: TimelineRow) => (
     <div
@@ -463,6 +493,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   const changedFileCountLabel = String(checkpointFiles.length);
                   const allDirectoriesExpanded =
                     allDirectoriesExpandedByTurnId[turnSummary.turnId] ?? true;
+                  const selectedFile = resolveSelectedChangedFilePath({
+                    turnId: turnSummary.turnId,
+                    files: checkpointFiles,
+                    selectedFileByTurnId,
+                    activeDiffTurnId: selectedDiffTurnId,
+                    activeDiffFilePath: selectedDiffFilePath,
+                  });
+                  const canOpenInCodeEditor = Boolean(workspaceRoot) && selectedFile !== null;
                   return (
                     <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
                       <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -491,11 +529,25 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                             type="button"
                             size="xs"
                             variant="outline"
-                            onClick={() =>
-                              onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)
-                            }
+                            onClick={() => {
+                              if (!selectedFile) return;
+                              selectFile(turnSummary.turnId, selectedFile);
+                            }}
                           >
                             View diff
+                          </Button>
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="outline"
+                            disabled={!canOpenInCodeEditor}
+                            onClick={() => {
+                              if (!selectedFile) return;
+                              openFileInEditor(turnSummary.turnId, selectedFile);
+                            }}
+                          >
+                            <ExternalLinkIcon className="size-3" />
+                            Open in code editor
                           </Button>
                         </div>
                       </div>
@@ -505,7 +557,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                         files={checkpointFiles}
                         allDirectoriesExpanded={allDirectoriesExpanded}
                         resolvedTheme={resolvedTheme}
-                        onOpenTurnDiff={onOpenTurnDiff}
+                        selectedFilePath={selectedFile}
+                        onSelectChangedFile={selectFile}
                       />
                     </div>
                   );

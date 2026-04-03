@@ -39,7 +39,7 @@ export function WorkspaceTreeNode(props: {
       <button
         type="button"
         className={cn(
-          "flex w-full min-w-0 items-center gap-1 rounded-md px-2 py-1 text-left text-sm transition-colors hover:bg-accent/60",
+          "flex w-full min-w-0 cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-left text-sm transition-colors hover:bg-accent/60",
           isSelected && "bg-accent text-accent-foreground",
         )}
         style={{ paddingLeft: `${props.depth * 0.75 + 0.5}rem` }}

@@ -31,6 +31,7 @@ interface WorkspaceWorkbenchStoreState {
   setSelectedPath: (threadId: ThreadId, path: string | null) => void;
   setActiveFilePath: (threadId: ThreadId, path: string | null) => void;
   openFile: (threadId: ThreadId, path: string) => void;
+  revealFile: (threadId: ThreadId, path: string) => void;
   closeFile: (threadId: ThreadId, path: string) => void;
   setDirectoryExpanded: (threadId: ThreadId, path: string, expanded: boolean) => void;
   hydrateFileDraft: (
@@ -141,6 +142,24 @@ function appendUniquePath(paths: string[], path: string): string[] {
     return paths;
   }
   return [...paths, path];
+}
+
+function ancestorDirectoryPaths(path: string): string[] {
+  const normalized = path.trim().replace(/^\/+|\/+$/g, "");
+  if (normalized.length === 0) {
+    return [];
+  }
+
+  const segments = normalized.split("/").filter((segment) => segment.length > 0);
+  if (segments.length <= 1) {
+    return [];
+  }
+
+  const ancestors: string[] = [];
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    ancestors.push(segments.slice(0, index + 1).join("/"));
+  }
+  return ancestors;
 }
 
 function normalizeThreadState(state: WorkspaceThreadState): WorkspaceThreadState {
@@ -336,6 +355,36 @@ export const useWorkspaceWorkbenchStore = create<WorkspaceWorkbenchStoreState>()
               nextOpenFilePaths === currentOpenFilePaths
                 ? state.openFilePathsByThreadId
                 : { ...state.openFilePathsByThreadId, [threadId]: nextOpenFilePaths },
+            activeFilePathByThreadId:
+              state.activeFilePathByThreadId[threadId] === path
+                ? state.activeFilePathByThreadId
+                : { ...state.activeFilePathByThreadId, [threadId]: path },
+          };
+        }),
+      revealFile: (threadId, path) =>
+        set((state) => {
+          const openPaths = state.openFilePathsByThreadId[threadId] ?? [];
+          const nextOpenPaths = appendUniquePath(openPaths, path);
+          const expandedPaths = uniqueSortedPaths([
+            ...selectWorkspaceThreadState(state.threadStateByThreadId, threadId)
+              .expandedDirectoryPaths,
+            ...ancestorDirectoryPaths(path),
+          ]);
+
+          return {
+            threadStateByThreadId: updateThreadStateByThreadId(
+              state.threadStateByThreadId,
+              threadId,
+              (current) => ({
+                ...copyThreadState(current),
+                selectedPath: path,
+                expandedDirectoryPaths: expandedPaths,
+              }),
+            ),
+            openFilePathsByThreadId:
+              nextOpenPaths === openPaths
+                ? state.openFilePathsByThreadId
+                : { ...state.openFilePathsByThreadId, [threadId]: nextOpenPaths },
             activeFilePathByThreadId:
               state.activeFilePathByThreadId[threadId] === path
                 ? state.activeFilePathByThreadId

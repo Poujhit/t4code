@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { computeMessageDurationStart, normalizeCompactToolLabel } from "./MessagesTimeline.logic";
+import {
+  computeMessageDurationStart,
+  defaultChangedFilePath,
+  normalizeCompactToolLabel,
+  resolveSelectedChangedFilePath,
+} from "./MessagesTimeline.logic";
 
 describe("computeMessageDurationStart", () => {
   it("returns message createdAt when there is no preceding user message", () => {
@@ -141,5 +146,49 @@ describe("normalizeCompactToolLabel", () => {
 
   it("removes trailing completion wording from other labels", () => {
     expect(normalizeCompactToolLabel("Read file completed")).toBe("Read file");
+  });
+});
+
+describe("changed file selection", () => {
+  const files = [{ path: "src/a.ts" }, { path: "src/b.ts" }];
+
+  it("defaults to the first changed file", () => {
+    expect(defaultChangedFilePath(files)).toBe("src/a.ts");
+  });
+
+  it("prefers the locally selected file for the turn", () => {
+    expect(
+      resolveSelectedChangedFilePath({
+        turnId: "turn-1",
+        files,
+        selectedFileByTurnId: { "turn-1": "src/b.ts" },
+        activeDiffTurnId: "turn-1",
+        activeDiffFilePath: "src/a.ts",
+      }),
+    ).toBe("src/b.ts");
+  });
+
+  it("falls back to the active diff file for the same turn", () => {
+    expect(
+      resolveSelectedChangedFilePath({
+        turnId: "turn-1",
+        files,
+        selectedFileByTurnId: {},
+        activeDiffTurnId: "turn-1",
+        activeDiffFilePath: "src/b.ts",
+      }),
+    ).toBe("src/b.ts");
+  });
+
+  it("ignores selections that are not part of the current changed-file set", () => {
+    expect(
+      resolveSelectedChangedFilePath({
+        turnId: "turn-1",
+        files,
+        selectedFileByTurnId: { "turn-1": "src/missing.ts" },
+        activeDiffTurnId: "turn-2",
+        activeDiffFilePath: "src/other.ts",
+      }),
+    ).toBe("src/a.ts");
   });
 });
