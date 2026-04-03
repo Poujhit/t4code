@@ -1,5 +1,5 @@
 import { type TurnId } from "@t3tools/contracts";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { type TurnDiffFileChange } from "../../types";
 import { buildTurnDiffTree, type TurnDiffTreeNode } from "../../lib/turnDiffTree";
 import { ChevronRightIcon, FolderIcon, FolderClosedIcon } from "lucide-react";
@@ -7,52 +7,70 @@ import { cn } from "~/lib/utils";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { VscodeEntryIcon } from "./VscodeEntryIcon";
 
+const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {};
+
 export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
   turnId: TurnId;
   files: ReadonlyArray<TurnDiffFileChange>;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
-  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  selectedFilePath: string | null;
+  onSelectChangedFile: (turnId: TurnId, filePath: string) => void;
 }) {
-  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId } = props;
+  const {
+    files,
+    allDirectoriesExpanded,
+    onSelectChangedFile,
+    resolvedTheme,
+    selectedFilePath,
+    turnId,
+  } = props;
   const treeNodes = useMemo(() => buildTurnDiffTree(files), [files]);
   const directoryPathsKey = useMemo(
     () => collectDirectoryPaths(treeNodes).join("\u0000"),
     [treeNodes],
   );
-  const allDirectoryExpansionState = useMemo(
-    () =>
-      buildDirectoryExpansionState(
-        directoryPathsKey ? directoryPathsKey.split("\u0000") : [],
-        allDirectoriesExpanded,
-      ),
-    [allDirectoriesExpanded, directoryPathsKey],
-  );
-  const [expandedDirectories, setExpandedDirectories] = useState<Record<string, boolean>>(() =>
-    buildDirectoryExpansionState(directoryPathsKey ? directoryPathsKey.split("\u0000") : [], true),
-  );
-  useEffect(() => {
-    setExpandedDirectories(allDirectoryExpansionState);
-  }, [allDirectoryExpansionState]);
+  const expansionStateKey = `${allDirectoriesExpanded ? "expanded" : "collapsed"}\u0000${directoryPathsKey}`;
+  const [directoryExpansionState, setDirectoryExpansionState] = useState<{
+    key: string;
+    overrides: Record<string, boolean>;
+  }>(() => ({
+    key: expansionStateKey,
+    overrides: {},
+  }));
+  const expandedDirectories =
+    directoryExpansionState.key === expansionStateKey
+      ? directoryExpansionState.overrides
+      : EMPTY_DIRECTORY_OVERRIDES;
 
-  const toggleDirectory = useCallback((pathValue: string, fallbackExpanded: boolean) => {
-    setExpandedDirectories((current) => ({
-      ...current,
-      [pathValue]: !(current[pathValue] ?? fallbackExpanded),
-    }));
-  }, []);
+  const toggleDirectory = useCallback(
+    (pathValue: string) => {
+      setDirectoryExpansionState((current) => {
+        const nextOverrides = current.key === expansionStateKey ? current.overrides : {};
+        return {
+          key: expansionStateKey,
+          overrides: {
+            ...nextOverrides,
+            [pathValue]: !(nextOverrides[pathValue] ?? allDirectoriesExpanded),
+          },
+        };
+      });
+    },
+    [allDirectoriesExpanded, expansionStateKey],
+  );
 
   const renderTreeNode = (node: TurnDiffTreeNode, depth: number) => {
     const leftPadding = 8 + depth * 14;
     if (node.kind === "directory") {
-      const isExpanded = expandedDirectories[node.path] ?? depth === 0;
+      const isExpanded = expandedDirectories[node.path] ?? allDirectoriesExpanded;
       return (
         <div key={`dir:${node.path}`}>
           <button
             type="button"
+            data-scroll-anchor-ignore
             className="group flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80"
             style={{ paddingLeft: `${leftPadding}px` }}
-            onClick={() => toggleDirectory(node.path, depth === 0)}
+            onClick={() => toggleDirectory(node.path)}
           >
             <ChevronRightIcon
               aria-hidden="true"
@@ -88,18 +106,30 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
       <button
         key={`file:${node.path}`}
         type="button"
-        className="group flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80"
+        className={cn(
+          "group flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-background/80",
+          selectedFilePath === node.path && "bg-background/80 ring-1 ring-border/70",
+        )}
         style={{ paddingLeft: `${leftPadding}px` }}
-        onClick={() => onOpenTurnDiff(turnId, node.path)}
+        aria-pressed={selectedFilePath === node.path}
+        onClick={() => onSelectChangedFile(turnId, node.path)}
       >
         <span aria-hidden="true" className="size-3.5 shrink-0" />
         <VscodeEntryIcon
           pathValue={node.path}
           kind="file"
           theme={resolvedTheme}
-          className="size-3.5 text-muted-foreground/70"
+          className={cn(
+            "size-3.5 text-muted-foreground/70",
+            selectedFilePath === node.path && "text-foreground",
+          )}
         />
-        <span className="truncate font-mono text-[11px] text-muted-foreground/80 group-hover:text-foreground/90">
+        <span
+          className={cn(
+            "truncate font-mono text-[11px] text-muted-foreground/80 group-hover:text-foreground/90",
+            selectedFilePath === node.path && "text-foreground",
+          )}
+        >
           {node.name}
         </span>
         {node.stat && (
@@ -122,15 +152,4 @@ function collectDirectoryPaths(nodes: ReadonlyArray<TurnDiffTreeNode>): string[]
     paths.push(...collectDirectoryPaths(node.children));
   }
   return paths;
-}
-
-function buildDirectoryExpansionState(
-  directoryPaths: ReadonlyArray<string>,
-  expanded: boolean,
-): Record<string, boolean> {
-  const expandedState: Record<string, boolean> = {};
-  for (const directoryPath of directoryPaths) {
-    expandedState[directoryPath] = expanded;
-  }
-  return expandedState;
 }

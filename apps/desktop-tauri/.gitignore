@@ -1,0 +1,5 @@
+dist
+.cache
+.stage
+src-tauri/target
+
