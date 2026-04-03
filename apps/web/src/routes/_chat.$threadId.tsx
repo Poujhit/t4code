@@ -25,6 +25,7 @@ import { WorkspaceWorkbenchSurface } from "../components/workbench/WorkspaceWork
 import type { CodeSelection } from "../lib/workspaceCodeSelection";
 import { useWorkspaceWorkbenchStore } from "../workspaceWorkbenchStore";
 import { getLocalStorageItem } from "../hooks/useLocalStorage";
+import { useProjectById } from "../storeSelectors";
 import { Schema } from "effect";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
@@ -194,8 +195,8 @@ const DiffPanelInlineSidebar = (props: {
 };
 
 function ChatThreadRouteView() {
-  const threadsHydrated = useStore((store) => store.threadsHydrated);
-  const { activeDraftThread, activeThread, projects } = useHandleNewThread();
+  const bootstrapComplete = useStore((store) => store.bootstrapComplete);
+  const { activeDraftThread, activeThread } = useHandleNewThread();
   const navigate = useNavigate();
   const threadId = Route.useParams({
     select: (params) => ThreadId.makeUnsafe(params.threadId),
@@ -218,9 +219,7 @@ function ChatThreadRouteView() {
   const [hasOpenedWorkspace, setHasOpenedWorkspace] = useState(workspaceOpen);
   const [diffInlineWidth, setDiffInlineWidth] = useState(() => readDiffInlineWidth());
   const addCodeSelectionToPromptRef = useRef<((selection: CodeSelection) => void) | null>(null);
-  const activeProject = projects.find(
-    (project) => project.id === (activeThread?.projectId ?? activeDraftThread?.projectId),
-  );
+  const activeProject = useProjectById(activeThread?.projectId ?? activeDraftThread?.projectId);
   const workspaceRoot =
     activeThread?.worktreePath ?? activeDraftThread?.worktreePath ?? activeProject?.cwd ?? null;
   const closeDiff = useCallback(() => {
@@ -288,7 +287,7 @@ function ChatThreadRouteView() {
   }, [syncThreadRoot, threadId, workspaceRoot]);
 
   useEffect(() => {
-    if (!threadsHydrated) {
+    if (!bootstrapComplete) {
       return;
     }
 
@@ -296,9 +295,9 @@ function ChatThreadRouteView() {
       void navigate({ to: "/", replace: true });
       return;
     }
-  }, [navigate, routeThreadExists, threadsHydrated, threadId]);
+  }, [bootstrapComplete, navigate, routeThreadExists]);
 
-  if (!threadsHydrated || !routeThreadExists) {
+  if (!bootstrapComplete || !routeThreadExists) {
     return null;
   }
 
