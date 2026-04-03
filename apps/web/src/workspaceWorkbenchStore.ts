@@ -25,8 +25,8 @@ interface WorkspaceWorkbenchStoreState {
   lastLoadErrorByThreadIdAndPath: Record<string, WorkspaceFileErrorState>;
   setWorkspaceOpen: (open: boolean) => void;
   toggleWorkspaceOpen: () => void;
-  setWorkspacePaneWidth: (width: number) => void;
-  clampWorkspacePaneWidthToViewport: () => void;
+  setWorkspacePaneWidth: (width: number, reservedWidth?: number) => void;
+  clampWorkspacePaneWidthToViewport: (reservedWidth?: number) => void;
   syncThreadRoot: (threadId: ThreadId, rootPath: string | null) => void;
   setSelectedPath: (threadId: ThreadId, path: string | null) => void;
   setActiveFilePath: (threadId: ThreadId, path: string | null) => void;
@@ -230,12 +230,13 @@ function updateThreadStateByThreadId(
   };
 }
 
-export function clampWorkspacePaneWidth(width: number): number {
+export function clampWorkspacePaneWidth(width: number, reservedWidth = 0): number {
   if (typeof window === "undefined") {
     return Math.max(WORKSPACE_INLINE_MIN_WIDTH, Math.min(width, WORKSPACE_INLINE_MAX_WIDTH));
   }
 
-  const viewportMaxWidth = window.innerWidth - WORKSPACE_INLINE_MIN_MAIN_CONTENT_WIDTH;
+  const viewportMaxWidth =
+    window.innerWidth - reservedWidth - WORKSPACE_INLINE_MIN_MAIN_CONTENT_WIDTH;
   return Math.max(
     WORKSPACE_INLINE_MIN_WIDTH,
     Math.min(width, WORKSPACE_INLINE_MAX_WIDTH, viewportMaxWidth),
@@ -271,14 +272,14 @@ export const useWorkspaceWorkbenchStore = create<WorkspaceWorkbenchStoreState>()
       setWorkspaceOpen: (open) =>
         set((state) => (state.isWorkspaceOpen === open ? state : { isWorkspaceOpen: open })),
       toggleWorkspaceOpen: () => set((state) => ({ isWorkspaceOpen: !state.isWorkspaceOpen })),
-      setWorkspacePaneWidth: (width) =>
+      setWorkspacePaneWidth: (width, reservedWidth = 0) =>
         set((state) => {
-          const nextWidth = clampWorkspacePaneWidth(width);
+          const nextWidth = clampWorkspacePaneWidth(width, reservedWidth);
           return state.workspacePaneWidth === nextWidth ? state : { workspacePaneWidth: nextWidth };
         }),
-      clampWorkspacePaneWidthToViewport: () =>
+      clampWorkspacePaneWidthToViewport: (reservedWidth = 0) =>
         set((state) => {
-          const nextWidth = clampWorkspacePaneWidth(state.workspacePaneWidth);
+          const nextWidth = clampWorkspacePaneWidth(state.workspacePaneWidth, reservedWidth);
           return state.workspacePaneWidth === nextWidth ? state : { workspacePaneWidth: nextWidth };
         }),
       syncThreadRoot: (threadId, rootPath) =>

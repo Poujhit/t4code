@@ -17,28 +17,31 @@ export function WorkspaceWorkbenchSurface(props: {
   open: boolean;
   threadId: ThreadId;
   workspaceRoot: string | null;
+  reservedWidth?: number;
   onClose: () => void;
   renderContent: boolean;
   onAddCodeSelectionToPrompt?: ((selection: CodeSelection) => void) | null;
 }) {
+  const reservedWidth = props.reservedWidth ?? 0;
   const desktopWidth = useWorkspaceWorkbenchStore((state) => state.workspacePaneWidth);
   const setWorkspacePaneWidth = useWorkspaceWorkbenchStore((state) => state.setWorkspacePaneWidth);
   const clampWorkspacePaneWidthToViewport = useWorkspaceWorkbenchStore(
     (state) => state.clampWorkspacePaneWidthToViewport,
   );
-  const clampedDesktopWidth = clampWorkspacePaneWidth(desktopWidth);
+  const clampedDesktopWidth = clampWorkspacePaneWidth(desktopWidth, reservedWidth);
   const [isResizing, setIsResizing] = useState(false);
 
   useEffect(() => {
     if (props.mobile) {
       return;
     }
-    clampWorkspacePaneWidthToViewport();
-    window.addEventListener("resize", clampWorkspacePaneWidthToViewport);
+    const clampToViewport = () => clampWorkspacePaneWidthToViewport(reservedWidth);
+    clampToViewport();
+    window.addEventListener("resize", clampToViewport);
     return () => {
-      window.removeEventListener("resize", clampWorkspacePaneWidthToViewport);
+      window.removeEventListener("resize", clampToViewport);
     };
-  }, [clampWorkspacePaneWidthToViewport, props.mobile]);
+  }, [clampWorkspacePaneWidthToViewport, props.mobile, reservedWidth]);
   const startResize = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       if (props.mobile || event.button !== 0) {
@@ -55,7 +58,7 @@ export function WorkspaceWorkbenchSurface(props: {
       document.body.style.userSelect = "none";
 
       const handlePointerMove = (moveEvent: PointerEvent) => {
-        setWorkspacePaneWidth(startWidth + (startX - moveEvent.clientX));
+        setWorkspacePaneWidth(startWidth + (startX - moveEvent.clientX), reservedWidth);
       };
 
       const finishResize = () => {
@@ -69,7 +72,7 @@ export function WorkspaceWorkbenchSurface(props: {
       window.addEventListener("pointermove", handlePointerMove);
       window.addEventListener("pointerup", finishResize, { once: true });
     },
-    [clampedDesktopWidth, props.mobile, setWorkspacePaneWidth],
+    [clampedDesktopWidth, props.mobile, reservedWidth, setWorkspacePaneWidth],
   );
 
   if (props.mobile) {

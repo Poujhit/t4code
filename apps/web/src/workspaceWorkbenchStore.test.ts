@@ -1,5 +1,5 @@
 import { ThreadId } from "@t3tools/contracts";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   clampWorkspacePaneWidth,
@@ -58,6 +58,21 @@ describe("workspaceWorkbenchStore", () => {
     expect(useWorkspaceWorkbenchStore.getState().workspacePaneWidth).toBe(
       clampWorkspacePaneWidth(WORKSPACE_INLINE_MIN_WIDTH - 500),
     );
+  });
+
+  it("clamps workspace width against reserved diff width", () => {
+    const originalWindow = globalThis.window;
+    vi.stubGlobal("window", {
+      innerWidth: 1800,
+    });
+
+    expect(clampWorkspacePaneWidth(800, 500)).toBe(660);
+
+    if (originalWindow) {
+      vi.stubGlobal("window", originalWindow);
+    } else {
+      Reflect.deleteProperty(globalThis, "window");
+    }
   });
 
   it("keeps selection and expansion scoped per thread", () => {

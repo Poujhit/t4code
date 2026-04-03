@@ -24,13 +24,40 @@ import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { WorkspaceWorkbenchSurface } from "../components/workbench/WorkspaceWorkbenchSurface";
 import type { CodeSelection } from "../lib/workspaceCodeSelection";
 import { useWorkspaceWorkbenchStore } from "../workspaceWorkbenchStore";
+import { getLocalStorageItem } from "../hooks/useLocalStorage";
+import { Schema } from "effect";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
 const DIFF_INLINE_LAYOUT_MEDIA_QUERY = "(max-width: 1180px)";
 const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
 const DIFF_INLINE_DEFAULT_WIDTH = "clamp(28rem,48vw,44rem)";
 const DIFF_INLINE_SIDEBAR_MIN_WIDTH = 26 * 16;
+const DIFF_INLINE_SIDEBAR_MAX_WIDTH = 44 * 16;
 const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
+
+function defaultDiffInlineWidth(): number {
+  if (typeof window === "undefined") {
+    return DIFF_INLINE_SIDEBAR_MIN_WIDTH;
+  }
+
+  const rootFontSize =
+    Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
+  return Math.min(
+    DIFF_INLINE_SIDEBAR_MAX_WIDTH,
+    Math.max(28 * rootFontSize, window.innerWidth * 0.48),
+  );
+}
+
+function readDiffInlineWidth(): number {
+  const storedWidth = getLocalStorageItem(DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY, Schema.Finite);
+  if (storedWidth === null) {
+    return defaultDiffInlineWidth();
+  }
+  return Math.max(
+    DIFF_INLINE_SIDEBAR_MIN_WIDTH,
+    Math.min(storedWidth, DIFF_INLINE_SIDEBAR_MAX_WIDTH),
+  );
+}
 
 const DiffPanelSheet = (props: {
   children: ReactNode;
@@ -78,11 +105,12 @@ const LazyDiffPanel = (props: { mode: DiffPanelMode }) => {
 
 const DiffPanelInlineSidebar = (props: {
   diffOpen: boolean;
+  onResize: (width: number) => void;
   onCloseDiff: () => void;
   onOpenDiff: () => void;
   renderDiffContent: boolean;
 }) => {
-  const { diffOpen, onCloseDiff, onOpenDiff, renderDiffContent } = props;
+  const { diffOpen, onCloseDiff, onOpenDiff, onResize, renderDiffContent } = props;
   const onOpenChange = useCallback(
     (open: boolean) => {
       if (open) {
@@ -153,6 +181,7 @@ const DiffPanelInlineSidebar = (props: {
         className="border-l border-border bg-card text-foreground"
         resizable={{
           minWidth: DIFF_INLINE_SIDEBAR_MIN_WIDTH,
+          onResize,
           shouldAcceptWidth: shouldAcceptInlineSidebarWidth,
           storageKey: DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
@@ -187,6 +216,7 @@ function ChatThreadRouteView() {
   // unless remountDeps are configured, so this stays warm across thread switches.
   const [hasOpenedDiff, setHasOpenedDiff] = useState(diffOpen);
   const [hasOpenedWorkspace, setHasOpenedWorkspace] = useState(workspaceOpen);
+  const [diffInlineWidth, setDiffInlineWidth] = useState(() => readDiffInlineWidth());
   const addCodeSelectionToPromptRef = useRef<((selection: CodeSelection) => void) | null>(null);
   const activeProject = projects.find(
     (project) => project.id === (activeThread?.projectId ?? activeDraftThread?.projectId),
@@ -236,6 +266,24 @@ function ChatThreadRouteView() {
   }, [workspaceOpen]);
 
   useEffect(() => {
+    if (shouldUseDiffSheet) {
+      return;
+    }
+
+    const syncWidth = () => {
+      setDiffInlineWidth(readDiffInlineWidth());
+    };
+
+    syncWidth();
+    window.addEventListener("resize", syncWidth);
+    window.addEventListener("storage", syncWidth);
+    return () => {
+      window.removeEventListener("resize", syncWidth);
+      window.removeEventListener("storage", syncWidth);
+    };
+  }, [shouldUseDiffSheet]);
+
+  useEffect(() => {
     syncThreadRoot(threadId, workspaceRoot);
   }, [syncThreadRoot, threadId, workspaceRoot]);
 
@@ -256,6 +304,7 @@ function ChatThreadRouteView() {
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
   const shouldRenderWorkspaceContent = workspaceOpen || hasOpenedWorkspace;
+  const reservedWidth = !shouldUseDiffSheet && diffOpen ? diffInlineWidth : 0;
 
   if (!shouldUseDiffSheet) {
     return (
@@ -272,12 +321,14 @@ function ChatThreadRouteView() {
           open={workspaceOpen}
           threadId={threadId}
           workspaceRoot={workspaceRoot}
+          reservedWidth={reservedWidth}
           onClose={closeWorkspace}
           renderContent={shouldRenderWorkspaceContent}
           onAddCodeSelectionToPrompt={addCodeSelectionToPrompt}
         />
         <DiffPanelInlineSidebar
           diffOpen={diffOpen}
+          onResize={setDiffInlineWidth}
           onCloseDiff={closeDiff}
           onOpenDiff={openDiff}
           renderDiffContent={shouldRenderDiffContent}
@@ -300,6 +351,7 @@ function ChatThreadRouteView() {
         open={workspaceOpen}
         threadId={threadId}
         workspaceRoot={workspaceRoot}
+        reservedWidth={0}
         onClose={closeWorkspace}
         renderContent={shouldRenderWorkspaceContent}
         onAddCodeSelectionToPrompt={addCodeSelectionToPrompt}
