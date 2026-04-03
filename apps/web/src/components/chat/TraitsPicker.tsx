@@ -138,6 +138,45 @@ function getSelectedTraits(
   };
 }
 
+export function hasTraitControls(input: {
+  effort: string | null;
+  thinkingEnabled: boolean | null;
+  supportsFastMode: boolean;
+  contextWindowOptions: ReadonlyArray<unknown>;
+}): boolean {
+  return (
+    input.effort !== null ||
+    input.thinkingEnabled !== null ||
+    input.supportsFastMode ||
+    input.contextWindowOptions.length > 1
+  );
+}
+
+export function hasProviderTraitControls(input: {
+  provider: ProviderKind;
+  models: ReadonlyArray<ServerProviderModel>;
+  model: string | null | undefined;
+  prompt: string;
+  modelOptions: ProviderOptions | null | undefined;
+  allowPromptInjectedEffort?: boolean;
+}): boolean {
+  const selectedTraits = getSelectedTraits(
+    input.provider,
+    input.models,
+    input.model,
+    input.prompt,
+    input.modelOptions,
+    input.allowPromptInjectedEffort ?? true,
+  );
+
+  return hasTraitControls({
+    effort: selectedTraits.effort,
+    thinkingEnabled: selectedTraits.thinkingEnabled,
+    supportsFastMode: selectedTraits.caps.supportsFastMode,
+    contextWindowOptions: selectedTraits.contextWindowOptions,
+  });
+}
+
 export interface TraitsMenuContentProps {
   provider: ProviderKind;
   models: ReadonlyArray<ServerProviderModel>;
@@ -221,7 +260,14 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     ],
   );
 
-  if (effort === null && thinkingEnabled === null && contextWindowOptions.length <= 1) {
+  if (
+    !hasTraitControls({
+      effort,
+      thinkingEnabled,
+      supportsFastMode: caps.supportsFastMode,
+      contextWindowOptions,
+    })
+  ) {
     return null;
   }
 
@@ -366,6 +412,18 @@ export const TraitsPicker = memo(function TraitsPicker({
     .join(" · ");
 
   const isCodexStyle = provider === "codex";
+
+  if (
+    !hasTraitControls({
+      effort,
+      thinkingEnabled,
+      supportsFastMode: caps.supportsFastMode,
+      contextWindowOptions,
+    }) ||
+    triggerLabel.length === 0
+  ) {
+    return null;
+  }
 
   return (
     <Menu
