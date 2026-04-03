@@ -1,12 +1,12 @@
 import { WsRpcGroup } from "@t3tools/contracts";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime } from "effect";
 import { AtomRpc } from "effect/unstable/reactivity";
 
 import { createWsRpcProtocolLayer } from "./protocol";
 
 export class WsRpcAtomClient extends AtomRpc.Service<WsRpcAtomClient>()("WsRpcAtomClient", {
   group: WsRpcGroup,
-  protocol: Layer.suspend(() => createWsRpcProtocolLayer()),
+  protocol: createWsRpcProtocolLayer(),
 }) {}
 
 let sharedRuntime: ManagedRuntime.ManagedRuntime<WsRpcAtomClient, never> | null = null;

@@ -160,7 +160,8 @@ function createBaseTimelineProps(input: {
     nowIso: isoAt(10_000),
     expandedWorkGroups: input.expandedWorkGroups ?? {},
     onToggleWorkGroup: () => {},
-    onOpenTurnDiff: () => {},
+    onSelectChangedFile: () => {},
+    onOpenChangedFileInCodeEditor: () => {},
     revertTurnCountByUserMessageId: new Map(),
     onRevertUserMessage: () => {},
     isRevertingCheckpoint: false,
@@ -169,6 +170,8 @@ function createBaseTimelineProps(input: {
     resolvedTheme: "light",
     timestampFormat: "locale",
     workspaceRoot: MARKDOWN_CWD,
+    selectedDiffTurnId: null,
+    selectedDiffFilePath: null,
     ...(input.onVirtualizerSnapshot ? { onVirtualizerSnapshot: input.onVirtualizerSnapshot } : {}),
   };
 }

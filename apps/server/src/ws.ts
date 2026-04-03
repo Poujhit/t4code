@@ -8,6 +8,8 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
+  ProjectListDirectoryError,
+  ProjectReadFileError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
@@ -277,6 +279,38 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           ),
           { "rpc.aggregate": "workspace" },
         ),
+      [WS_METHODS.projectsListDirectory]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.projectsListDirectory,
+          workspaceFileSystem.listDirectory(input).pipe(
+            Effect.mapError((cause) => {
+              const message = Schema.is(WorkspacePathOutsideRootError)(cause)
+                ? "Workspace directory path must stay within the project root."
+                : cause.detail;
+              return new ProjectListDirectoryError({
+                message,
+                cause,
+              });
+            }),
+          ),
+          { "rpc.aggregate": "workspace" },
+        ),
+      [WS_METHODS.projectsReadFile]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.projectsReadFile,
+          workspaceFileSystem.readFile(input).pipe(
+            Effect.mapError((cause) => {
+              const message = Schema.is(WorkspacePathOutsideRootError)(cause)
+                ? "Workspace file path must stay within the project root."
+                : cause.detail;
+              return new ProjectReadFileError({
+                message,
+                cause,
+              });
+            }),
+          ),
+          { "rpc.aggregate": "workspace" },
+        ),
       [WS_METHODS.projectsWriteFile]: (input) =>
         observeRpcEffect(
           WS_METHODS.projectsWriteFile,
@@ -284,7 +318,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             Effect.mapError((cause) => {
               const message = Schema.is(WorkspacePathOutsideRootError)(cause)
                 ? "Workspace file path must stay within the project root."
-                : "Failed to write workspace file";
+                : cause.detail;
               return new ProjectWriteFileError({
                 message,
                 cause,

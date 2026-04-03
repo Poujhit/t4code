@@ -1,13 +1,18 @@
+import fsPromises from "node:fs/promises";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, describe, expect } from "@effect/vitest";
-import { Effect, FileSystem, Layer, Path } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
 
 import { ServerConfig } from "../../config.ts";
 import { GitCoreLive } from "../../git/Layers/GitCore.ts";
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
-import { WorkspaceFileSystem } from "../Services/WorkspaceFileSystem.ts";
+import { WorkspaceFileSystem, WorkspaceFileSystemError } from "../Services/WorkspaceFileSystem.ts";
 import { WorkspaceEntriesLive } from "./WorkspaceEntries.ts";
-import { WorkspaceFileSystemLive } from "./WorkspaceFileSystem.ts";
+import {
+  WORKSPACE_EDITABLE_TEXT_SIZE_LIMIT_BYTES,
+  WorkspaceFileSystemLive,
+} from "./WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./WorkspacePaths.ts";
 
 const ProjectLayer = WorkspaceFileSystemLive.pipe(
@@ -50,6 +55,103 @@ const writeTextFile = Effect.fn("writeTextFile")(function* (
 });
 
 it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
+  describe("listDirectory", () => {
+    it.effect("lists only direct children and filters ignored directories", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "src/components/Composer.tsx");
+        yield* writeTextFile(cwd, "src/index.ts");
+        yield* writeTextFile(cwd, "README.md");
+        yield* writeTextFile(cwd, "node_modules/pkg/index.js");
+
+        const root = yield* workspaceFileSystem.listDirectory({
+          cwd,
+          relativePath: null,
+        });
+        expect(root).toEqual({
+          entries: [
+            { path: "src", name: "src", kind: "directory", parentPath: null },
+            { path: "README.md", name: "README.md", kind: "file", parentPath: null },
+          ],
+          truncated: false,
+        });
+
+        const nested = yield* workspaceFileSystem.listDirectory({
+          cwd,
+          relativePath: "src",
+        });
+        expect(nested).toEqual({
+          entries: [
+            {
+              path: "src/components",
+              name: "components",
+              kind: "directory",
+              parentPath: "src",
+            },
+            { path: "src/index.ts", name: "index.ts", kind: "file", parentPath: "src" },
+          ],
+          truncated: false,
+        });
+      }),
+    );
+  });
+
+  describe("readFile", () => {
+    it.effect("returns binary fallback metadata without file contents", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+        yield* Effect.promise(() =>
+          fsPromises.writeFile(path.join(cwd, "image.bin"), Buffer.from([0x01, 0x00, 0x02])),
+        );
+
+        const result = yield* workspaceFileSystem.readFile({
+          cwd,
+          relativePath: "image.bin",
+        });
+
+        expect(result).toEqual({
+          relativePath: "image.bin",
+          contents: "",
+          mtimeMs: result.mtimeMs,
+          sizeBytes: 3,
+          isBinary: true,
+          isTooLarge: false,
+        });
+        expect(typeof result.mtimeMs).toBe("number");
+      }),
+    );
+
+    it.effect("returns too-large fallback metadata without loading full contents", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(
+          cwd,
+          "large.txt",
+          "a".repeat(WORKSPACE_EDITABLE_TEXT_SIZE_LIMIT_BYTES + 1),
+        );
+
+        const result = yield* workspaceFileSystem.readFile({
+          cwd,
+          relativePath: "large.txt",
+        });
+
+        expect(result).toEqual({
+          relativePath: "large.txt",
+          contents: "",
+          mtimeMs: result.mtimeMs,
+          sizeBytes: WORKSPACE_EDITABLE_TEXT_SIZE_LIMIT_BYTES + 1,
+          isBinary: false,
+          isTooLarge: true,
+        });
+        expect(typeof result.mtimeMs).toBe("number");
+      }),
+    );
+  });
+
   describe("writeFile", () => {
     it.effect("writes files relative to the workspace root", () =>
       Effect.gen(function* () {
@@ -130,6 +232,39 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
           .stat(escapedPath)
           .pipe(Effect.catch(() => Effect.succeed(null)));
         expect(escapedStat).toBeNull();
+      }),
+    );
+
+    it.effect("rejects stale writes when the on-disk mtime changes", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const absolutePath = path.join(cwd, "notes.md");
+        yield* fileSystem.writeFileString(absolutePath, "first\n");
+        const originalStats = yield* fileSystem.stat(absolutePath);
+        const originalMtimeMs = Option.getOrElse(originalStats.mtime, () => new Date(0)).getTime();
+
+        yield* fileSystem.writeFileString(absolutePath, "second\n");
+        const updatedTime = new Date(originalMtimeMs + 5_000);
+        yield* Effect.promise(() => fsPromises.utimes(absolutePath, updatedTime, updatedTime));
+
+        const error = yield* workspaceFileSystem
+          .writeFile({
+            cwd,
+            relativePath: "notes.md",
+            contents: "third\n",
+            expectedMtimeMs: originalMtimeMs,
+          })
+          .pipe(Effect.flip);
+
+        expect(Schema.is(WorkspaceFileSystemError)(error)).toBe(true);
+        if (Schema.is(WorkspaceFileSystemError)(error)) {
+          expect(error.detail).toContain("Workspace file changed on disk since it was opened");
+        }
+        const saved = yield* fileSystem.readFileString(absolutePath).pipe(Effect.orDie);
+        expect(saved).toBe("second\n");
       }),
     );
   });

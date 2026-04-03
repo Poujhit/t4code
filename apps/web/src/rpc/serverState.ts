@@ -1,4 +1,3 @@
-import { useAtomSubscribe, useAtomValue } from "@effect/atom-react";
 import {
   DEFAULT_SERVER_SETTINGS,
   type EditorId,
@@ -11,7 +10,7 @@ import {
   type ServerSettings,
 } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
-import { useCallback, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 
 import type { WsRpcClient } from "../wsRpcClient";
 import { appAtomRegistry, resetAppAtomRegistryForTests } from "./atomRegistry";
@@ -248,42 +247,63 @@ function useLatestAtomSubscription<A>(
   const listenerRef = useRef(listener);
   listenerRef.current = listener;
 
-  const stableListener = useCallback((value: A | null) => {
-    if (value === null) {
-      return;
-    }
-    listenerRef.current(value as NonNullable<A>);
-  }, []);
+  useEffect(() => {
+    return appAtomRegistry.subscribe(
+      atom,
+      (value) => {
+        if (value === null) {
+          return;
+        }
+        listenerRef.current(value as NonNullable<A>);
+      },
+      { immediate: true },
+    );
+  }, [atom]);
+}
 
-  useAtomSubscribe(atom, stableListener, { immediate: true });
+function useRegistryAtomValue<A, B = A>(atom: Atom.Atom<A>, selector?: (value: A) => B): B {
+  const selectorRef = useRef(selector);
+  selectorRef.current = selector;
+
+  return useSyncExternalStore(
+    (onStoreChange) => appAtomRegistry.subscribe(atom, () => onStoreChange()),
+    () => {
+      const value = appAtomRegistry.get(atom);
+      return selectorRef.current ? selectorRef.current(value) : (value as unknown as B);
+    },
+    () => {
+      const value = appAtomRegistry.get(atom);
+      return selectorRef.current ? selectorRef.current(value) : (value as unknown as B);
+    },
+  );
 }
 
 export function useServerConfig(): ServerConfig | null {
-  return useAtomValue(serverConfigAtom);
+  return useRegistryAtomValue(serverConfigAtom);
 }
 
 export function useServerSettings(): ServerSettings {
-  return useAtomValue(serverConfigAtom, selectSettings);
+  return useRegistryAtomValue(serverConfigAtom, selectSettings);
 }
 
 export function useServerProviders(): ReadonlyArray<ServerProvider> {
-  return useAtomValue(serverConfigAtom, selectProviders);
+  return useRegistryAtomValue(serverConfigAtom, selectProviders);
 }
 
 export function useServerKeybindings(): ServerConfig["keybindings"] {
-  return useAtomValue(serverConfigAtom, selectKeybindings);
+  return useRegistryAtomValue(serverConfigAtom, selectKeybindings);
 }
 
 export function useServerAvailableEditors(): ReadonlyArray<EditorId> {
-  return useAtomValue(serverConfigAtom, selectAvailableEditors);
+  return useRegistryAtomValue(serverConfigAtom, selectAvailableEditors);
 }
 
 export function useServerKeybindingsConfigPath(): string | null {
-  return useAtomValue(serverConfigAtom, selectKeybindingsConfigPath);
+  return useRegistryAtomValue(serverConfigAtom, selectKeybindingsConfigPath);
 }
 
 export function useServerObservability(): ServerConfig["observability"] | null {
-  return useAtomValue(serverConfigAtom, selectObservability);
+  return useRegistryAtomValue(serverConfigAtom, selectObservability);
 }
 
 export function useServerWelcomeSubscription(

@@ -754,6 +754,68 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes websocket rpc projects.listDirectory", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-list-" });
+      yield* fs.makeDirectory(path.join(workspaceDir, "src", "components"), { recursive: true });
+      yield* fs.writeFileString(path.join(workspaceDir, "src", "index.ts"), "export {};");
+      yield* fs.writeFileString(path.join(workspaceDir, "README.md"), "# test");
+      yield* fs.makeDirectory(path.join(workspaceDir, "node_modules", "pkg"), { recursive: true });
+      yield* fs.writeFileString(path.join(workspaceDir, "node_modules", "pkg", "index.js"), "");
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsListDirectory]({
+            cwd: workspaceDir,
+            relativePath: null,
+          }),
+        ),
+      );
+
+      assert.deepEqual(response, {
+        entries: [
+          { path: "src", name: "src", kind: "directory", parentPath: null },
+          { path: "README.md", name: "README.md", kind: "file", parentPath: null },
+        ],
+        truncated: false,
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc projects.readFile", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-read-" });
+      yield* fs.makeDirectory(path.join(workspaceDir, "src"), { recursive: true });
+      yield* fs.writeFileString(path.join(workspaceDir, "src", "index.ts"), "export {};\n");
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsReadFile]({
+            cwd: workspaceDir,
+            relativePath: "src/index.ts",
+          }),
+        ),
+      );
+
+      assert.equal(response.relativePath, "src/index.ts");
+      assert.equal(response.contents, "export {};\n");
+      assert.equal(response.sizeBytes, "export {};\n".length);
+      assert.equal(response.isBinary, false);
+      assert.equal(response.isTooLarge, false);
+      assert.equal(typeof response.mtimeMs, "number");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc projects.writeFile errors", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
