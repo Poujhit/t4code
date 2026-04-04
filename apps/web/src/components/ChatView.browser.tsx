@@ -132,6 +132,7 @@ function createBaseServerConfig(): ServerConfig {
         auth: { status: "authenticated" },
         checkedAt: NOW_ISO,
         models: [],
+        features: { supportsConversationRollback: true },
       },
     ],
     availableEditors: [],

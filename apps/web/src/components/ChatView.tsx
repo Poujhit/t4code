@@ -9,6 +9,7 @@ import {
   type ProjectEntry,
   type ProjectId,
   type ProviderApprovalDecision,
+  PROVIDER_DISPLAY_NAMES,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ServerProvider,
@@ -1414,6 +1415,8 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
       codex: providerStatuses.find((provider) => provider.provider === "codex")?.models ?? [],
       claudeAgent:
         providerStatuses.find((provider) => provider.provider === "claudeAgent")?.models ?? [],
+      githubCopilot:
+        providerStatuses.find((provider) => provider.provider === "githubCopilot")?.models ?? [],
     }),
     [providerStatuses],
   );
@@ -1531,6 +1534,8 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
     () => providerStatuses.find((status) => status.provider === selectedProvider) ?? null,
     [selectedProvider, providerStatuses],
   );
+  const supportsCheckpointRevert =
+    activeProviderStatus?.features.supportsConversationRollback ?? true;
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
   const terminalShortcutLabelOptions = useMemo(
@@ -2775,6 +2780,13 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
         return;
       }
+      if (!supportsCheckpointRevert) {
+        setThreadError(
+          activeThread.id,
+          `${PROVIDER_DISPLAY_NAMES[selectedProvider]} does not support checkpoint revert.`,
+        );
+        return;
+      }
       const confirmed = await api.dialogs.confirm(
         [
           `Revert this thread to checkpoint ${turnCount}?`,
@@ -2804,7 +2816,16 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
       }
       setIsRevertingCheckpoint(false);
     },
-    [activeThread, isConnecting, isRevertingCheckpoint, isSendBusy, phase, setThreadError],
+    [
+      activeThread,
+      isConnecting,
+      isRevertingCheckpoint,
+      isSendBusy,
+      phase,
+      selectedProvider,
+      setThreadError,
+      supportsCheckpointRevert,
+    ],
   );
 
   const onSend = async (e?: { preventDefault: () => void }) => {
@@ -4057,7 +4078,9 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
                 onToggleWorkGroup={onToggleWorkGroup}
                 onSelectChangedFile={onSelectChangedFile}
                 onOpenChangedFileInCodeEditor={onOpenChangedFileInCodeEditor}
-                revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+                revertTurnCountByUserMessageId={
+                  supportsCheckpointRevert ? revertTurnCountByUserMessageId : new Map()
+                }
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
