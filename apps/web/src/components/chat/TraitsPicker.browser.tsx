@@ -54,6 +54,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         },
       },
     ],
+    features: { supportsConversationRollback: true },
   },
   {
     provider: "claudeAgent",
@@ -112,6 +113,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         },
       },
     ],
+    features: { supportsConversationRollback: true },
   },
 ];
 
