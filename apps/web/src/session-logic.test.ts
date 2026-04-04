@@ -709,6 +709,34 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.command).toBe("bun run lint");
   });
 
+  it("extracts commands from normalized input payloads", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "copilot-tool",
+        kind: "tool.completed",
+        summary: "View",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "View",
+          data: {
+            toolName: "View",
+            input: {
+              command: ["sed", "-n", "1,80p", "src/app.ts"],
+              filePath: "src/app.ts",
+            },
+            result: {
+              content: "file preview",
+            },
+            success: true,
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.command).toBe("sed -n 1,80p src/app.ts");
+  });
+
   it("keeps compact Codex tool metadata used for icons and labels", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -1161,17 +1189,24 @@ describe("deriveActiveWorkStartedAt", () => {
 });
 
 describe("PROVIDER_OPTIONS", () => {
-  it("advertises Claude as available while keeping Cursor as a placeholder", () => {
+  it("advertises built-in providers while keeping Cursor as a placeholder", () => {
     const claude = PROVIDER_OPTIONS.find((option) => option.value === "claudeAgent");
+    const githubCopilot = PROVIDER_OPTIONS.find((option) => option.value === "githubCopilot");
     const cursor = PROVIDER_OPTIONS.find((option) => option.value === "cursor");
     expect(PROVIDER_OPTIONS).toEqual([
       { value: "codex", label: "Codex", available: true },
       { value: "claudeAgent", label: "Claude", available: true },
+      { value: "githubCopilot", label: "GitHub Copilot", available: true },
       { value: "cursor", label: "Cursor", available: false },
     ]);
     expect(claude).toEqual({
       value: "claudeAgent",
       label: "Claude",
+      available: true,
+    });
+    expect(githubCopilot).toEqual({
+      value: "githubCopilot",
+      label: "GitHub Copilot",
       available: true,
     });
     expect(cursor).toEqual({
