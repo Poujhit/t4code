@@ -68,6 +68,24 @@ describe("ProviderSessionStartInput", () => {
     expect(parsed.modelSelection.options?.fastMode).toBe(true);
     expect(parsed.runtimeMode).toBe("full-access");
   });
+
+  it("accepts github copilot model selections", () => {
+    const parsed = decodeProviderSessionStartInput({
+      threadId: "thread-1",
+      provider: "githubCopilot",
+      cwd: "/tmp/workspace",
+      modelSelection: {
+        provider: "githubCopilot",
+        model: "gpt-4.1",
+        options: {},
+      },
+      runtimeMode: "full-access",
+    });
+
+    expect(parsed.provider).toBe("githubCopilot");
+    expect(parsed.modelSelection?.provider).toBe("githubCopilot");
+    expect(parsed.modelSelection?.model).toBe("gpt-4.1");
+  });
 });
 
 describe("ProviderSendTurnInput", () => {

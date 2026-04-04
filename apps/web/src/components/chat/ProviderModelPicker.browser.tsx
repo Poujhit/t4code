@@ -50,6 +50,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         },
       },
     ],
+    features: { supportsConversationRollback: true },
   },
   {
     provider: "claudeAgent",
@@ -107,6 +108,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         },
       },
     ],
+    features: { supportsConversationRollback: true },
   },
 ];
 
@@ -120,6 +122,7 @@ function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
     auth: { status: "authenticated" },
     checkedAt: new Date().toISOString(),
     models,
+    features: { supportsConversationRollback: true },
   };
 }
 

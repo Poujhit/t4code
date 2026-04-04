@@ -1,14 +1,14 @@
 /**
- * RoutingTextGeneration – Dispatches text generation requests to either the
- * Codex CLI or Claude CLI implementation based on the provider in each
- * request input.
+ * RoutingTextGeneration – Dispatches text generation requests to the concrete
+ * provider implementation selected in each request input.
  *
- * When `modelSelection.provider` is `"claudeAgent"` the request is forwarded to
- * the Claude layer; for any other value (including the default `undefined`) it
- * falls through to the Codex layer.
+ * GitHub Copilot provider sessions currently do not implement Git text
+ * generation, so those requests fail with a typed `TextGenerationError`
+ * instead of crashing server startup due to a missing layer binding.
  *
  * @module RoutingTextGeneration
  */
+import { TextGenerationError } from "@t3tools/contracts";
 import { Effect, Layer, ServiceMap } from "effect";
 
 import {
@@ -31,6 +31,10 @@ class ClaudeTextGen extends ServiceMap.Service<ClaudeTextGen, TextGenerationShap
   "t3/git/Layers/RoutingTextGeneration/ClaudeTextGen",
 ) {}
 
+class GitHubCopilotTextGen extends ServiceMap.Service<GitHubCopilotTextGen, TextGenerationShape>()(
+  "t3/git/Layers/RoutingTextGeneration/GitHubCopilotTextGen",
+) {}
+
 // ---------------------------------------------------------------------------
 // Routing implementation
 // ---------------------------------------------------------------------------
@@ -38,9 +42,10 @@ class ClaudeTextGen extends ServiceMap.Service<ClaudeTextGen, TextGenerationShap
 const makeRoutingTextGeneration = Effect.gen(function* () {
   const codex = yield* CodexTextGen;
   const claude = yield* ClaudeTextGen;
+  const githubCopilot = yield* GitHubCopilotTextGen;
 
   const route = (provider?: TextGenerationProvider): TextGenerationShape =>
-    provider === "claudeAgent" ? claude : codex;
+    provider === "claudeAgent" ? claude : provider === "githubCopilot" ? githubCopilot : codex;
 
   return {
     generateCommitMessage: (input) =>
@@ -67,7 +72,47 @@ const InternalClaudeLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(ClaudeTextGenerationLive));
 
+const makeUnsupportedGitHubCopilotTextGeneration = Effect.succeed({
+  generateCommitMessage: () =>
+    Effect.fail(
+      new TextGenerationError({
+        operation: "generateCommitMessage",
+        detail: "GitHub Copilot does not support Git text generation yet.",
+      }),
+    ),
+  generatePrContent: () =>
+    Effect.fail(
+      new TextGenerationError({
+        operation: "generatePrContent",
+        detail: "GitHub Copilot does not support Git text generation yet.",
+      }),
+    ),
+  generateBranchName: () =>
+    Effect.fail(
+      new TextGenerationError({
+        operation: "generateBranchName",
+        detail: "GitHub Copilot does not support Git text generation yet.",
+      }),
+    ),
+  generateThreadTitle: () =>
+    Effect.fail(
+      new TextGenerationError({
+        operation: "generateThreadTitle",
+        detail: "GitHub Copilot does not support Git text generation yet.",
+      }),
+    ),
+} satisfies TextGenerationShape);
+
+const InternalGitHubCopilotLayer = Layer.effect(
+  GitHubCopilotTextGen,
+  makeUnsupportedGitHubCopilotTextGeneration,
+);
+
 export const RoutingTextGenerationLive = Layer.effect(
   TextGeneration,
   makeRoutingTextGeneration,
-).pipe(Layer.provide(InternalCodexLayer), Layer.provide(InternalClaudeLayer));
+).pipe(
+  Layer.provide(InternalCodexLayer),
+  Layer.provide(InternalClaudeLayer),
+  Layer.provide(InternalGitHubCopilotLayer),
+);
