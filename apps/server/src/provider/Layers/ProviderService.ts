@@ -682,6 +682,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         "provider.thread_id": input.threadId,
         "provider.rollback_turns": input.numTurns,
       });
+      if (!routed.adapter.capabilities.supportsConversationRollback) {
+        return yield* toValidationError(
+          "ProviderService.rollbackConversation",
+          `${routed.adapter.provider} does not support conversation rollback.`,
+        );
+      }
       yield* routed.adapter.rollbackThread(routed.threadId, input.numTurns);
       yield* analytics.record("provider.conversation.rolled_back", {
         provider: routed.adapter.provider,

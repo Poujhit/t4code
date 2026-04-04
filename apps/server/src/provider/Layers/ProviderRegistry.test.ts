@@ -496,6 +496,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             checkedAt: "2026-03-25T00:00:00.000Z",
             version: "1.0.0",
             models: [],
+            features: { supportsConversationRollback: true },
           },
           {
             provider: "claudeAgent",
@@ -506,6 +507,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             checkedAt: "2026-03-25T00:00:00.000Z",
             version: "1.0.0",
             models: [],
+            features: { supportsConversationRollback: true },
           },
         ] as const satisfies ReadonlyArray<ServerProvider>;
 
