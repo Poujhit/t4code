@@ -4,6 +4,7 @@ import {
   type ClaudeCodeEffort,
   type ClaudeModelOptions,
   type CodexModelOptions,
+  type GitHubCopilotModelOptions,
   type ModelCapabilities,
   type ModelSelection,
   type ProviderKind,
@@ -115,6 +116,13 @@ export function normalizeClaudeModelOptionsWithCapabilities(
     ...(contextWindow !== undefined ? { contextWindow } : {}),
   };
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
+export function normalizeGitHubCopilotModelOptionsWithCapabilities(
+  _caps: ModelCapabilities,
+  modelOptions: GitHubCopilotModelOptions | null | undefined,
+): GitHubCopilotModelOptions | undefined {
+  return modelOptions && Object.keys(modelOptions).length > 0 ? modelOptions : undefined;
 }
 
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
