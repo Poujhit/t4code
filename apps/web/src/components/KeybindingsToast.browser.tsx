@@ -54,6 +54,7 @@ function createBaseServerConfig(): ServerConfig {
         auth: { status: "authenticated" },
         checkedAt: NOW_ISO,
         models: [],
+        features: { supportsConversationRollback: true },
       },
     ],
     availableEditors: [],
@@ -71,6 +72,7 @@ function createBaseServerConfig(): ServerConfig {
       providers: {
         codex: { enabled: true, binaryPath: "", homePath: "", customModels: [] },
         claudeAgent: { enabled: true, binaryPath: "", customModels: [] },
+        githubCopilot: { enabled: true, binaryPath: "", customModels: [] },
       },
     },
   };

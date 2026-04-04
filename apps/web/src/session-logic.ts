@@ -29,6 +29,7 @@ export const PROVIDER_OPTIONS: Array<{
 }> = [
   { value: "codex", label: "Codex", available: true },
   { value: "claudeAgent", label: "Claude", available: true },
+  { value: "githubCopilot", label: "GitHub Copilot", available: true },
   { value: "cursor", label: "Cursor", available: false },
 ];
 
@@ -653,12 +654,18 @@ function normalizeCommandValue(value: unknown): string | null {
 function extractToolCommand(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
+  const dataInput = asRecord(data?.input);
+  const dataResult = asRecord(data?.result);
+  const dataArguments = asRecord(data?.arguments);
   const itemResult = asRecord(item?.result);
   const itemInput = asRecord(item?.input);
   const candidates = [
     normalizeCommandValue(item?.command),
     normalizeCommandValue(itemInput?.command),
     normalizeCommandValue(itemResult?.command),
+    normalizeCommandValue(dataInput?.command),
+    normalizeCommandValue(dataResult?.command),
+    normalizeCommandValue(dataArguments?.command),
     normalizeCommandValue(data?.command),
   ];
   return candidates.find((candidate) => candidate !== null) ?? null;

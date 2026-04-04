@@ -129,6 +129,7 @@ export function buildServerProvider(input: {
   enabled: boolean;
   checkedAt: string;
   models: ReadonlyArray<ServerProviderModel>;
+  features?: ServerProvider["features"];
   probe: ProviderProbeResult;
 }): ServerProvider {
   return {
@@ -141,6 +142,9 @@ export function buildServerProvider(input: {
     checkedAt: input.checkedAt,
     ...(input.probe.message ? { message: input.probe.message } : {}),
     models: input.models,
+    features: input.features ?? {
+      supportsConversationRollback: true,
+    },
   };
 }
 

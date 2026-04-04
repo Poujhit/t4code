@@ -112,6 +112,12 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     binaryPlaceholder: "Claude binary path",
     binaryDescription: "Path to the Claude binary",
   },
+  {
+    provider: "githubCopilot",
+    title: "GitHub Copilot",
+    binaryPlaceholder: "Copilot binary path",
+    binaryDescription: "Path to the GitHub Copilot CLI binary",
+  },
 ] as const;
 
 const PROVIDER_STATUS_STYLES = {
@@ -537,12 +543,18 @@ export function GeneralSettingsPanel() {
         DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath ||
       settings.providers.claudeAgent.customModels.length > 0,
     ),
+    githubCopilot: Boolean(
+      settings.providers.githubCopilot.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.githubCopilot.binaryPath ||
+      settings.providers.githubCopilot.customModels.length > 0,
+    ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
   >({
     codex: "",
     claudeAgent: "",
+    githubCopilot: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -583,13 +595,20 @@ export function GeneralSettingsPanel() {
     return exports.length > 0 ? `${mode}. OTLP exporting ${exports.join(" and ")}.` : `${mode}.`;
   })();
 
-  const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
+  const textGenerationProviders = useMemo(
+    () => serverProviders.filter((provider) => provider.provider !== "githubCopilot"),
+    [serverProviders],
+  );
+  const textGenerationModelSelection = resolveAppModelSelectionState(
+    settings,
+    textGenerationProviders,
+  );
   const textGenProvider = textGenerationModelSelection.provider;
   const textGenModel = textGenerationModelSelection.model;
   const textGenModelOptions = textGenerationModelSelection.options;
   const gitModelOptionsByProvider = getCustomModelOptionsByProvider(
     settings,
-    serverProviders,
+    textGenerationProviders,
     textGenProvider,
     textGenModel,
   );
@@ -1020,7 +1039,8 @@ export function GeneralSettingsPanel() {
                 provider={textGenProvider}
                 model={textGenModel}
                 lockedProvider={null}
-                providers={serverProviders}
+                allowedProviders={["codex", "claudeAgent"]}
+                providers={textGenerationProviders}
                 modelOptionsByProvider={gitModelOptionsByProvider}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
@@ -1031,7 +1051,7 @@ export function GeneralSettingsPanel() {
                         ...settings,
                         textGenerationModelSelection: { provider, model },
                       },
-                      serverProviders,
+                      textGenerationProviders,
                     ),
                   });
                 }}
@@ -1039,7 +1059,7 @@ export function GeneralSettingsPanel() {
               <TraitsPicker
                 provider={textGenProvider}
                 models={
-                  serverProviders.find((provider) => provider.provider === textGenProvider)
+                  textGenerationProviders.find((provider) => provider.provider === textGenProvider)
                     ?.models ?? []
                 }
                 model={textGenModel}
@@ -1060,7 +1080,7 @@ export function GeneralSettingsPanel() {
                           ...(nextOptions ? { options: nextOptions } : {}),
                         },
                       },
-                      serverProviders,
+                      textGenerationProviders,
                     ),
                   });
                 }}

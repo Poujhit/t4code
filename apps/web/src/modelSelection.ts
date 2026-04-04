@@ -45,6 +45,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-5-0",
   },
+  githubCopilot: {
+    provider: "githubCopilot",
+    title: "GitHub Copilot",
+    description: "Save additional GitHub Copilot model slugs for the picker and `/model` command.",
+    placeholder: "your-copilot-model-slug",
+    example: "gpt-4.1",
+  },
 };
 
 export const MODEL_PROVIDER_SETTINGS = Object.values(PROVIDER_CUSTOM_MODEL_CONFIG);
@@ -164,6 +171,12 @@ export function getCustomModelOptionsByProvider(
       providers,
       "claudeAgent",
       selectedProvider === "claudeAgent" ? selectedModel : undefined,
+    ),
+    githubCopilot: getAppModelOptions(
+      settings,
+      providers,
+      "githubCopilot",
+      selectedProvider === "githubCopilot" ? selectedModel : undefined,
     ),
   };
 }

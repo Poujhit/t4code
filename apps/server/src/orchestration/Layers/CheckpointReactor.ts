@@ -628,6 +628,26 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    const activeProviderSession = yield* providerService
+      .listSessions()
+      .pipe(
+        Effect.map((sessions) =>
+          sessions.find((session) => session.threadId === event.payload.threadId),
+        ),
+      );
+    if (activeProviderSession) {
+      const capabilities = yield* providerService.getCapabilities(activeProviderSession.provider);
+      if (!capabilities.supportsConversationRollback) {
+        yield* appendRevertFailureActivity({
+          threadId: event.payload.threadId,
+          turnCount: event.payload.turnCount,
+          detail: `${activeProviderSession.provider} does not support checkpoint revert because it cannot rewind provider conversation state.`,
+          createdAt: now,
+        }).pipe(Effect.catch(() => Effect.void));
+        return;
+      }
+    }
+
     const restored = yield* checkpointStore.restoreCheckpoint({
       cwd: sessionRuntime.value.cwd,
       checkpointRef: targetCheckpointRef,

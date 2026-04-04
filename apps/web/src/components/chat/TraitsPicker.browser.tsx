@@ -54,6 +54,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         },
       },
     ],
+    features: { supportsConversationRollback: true },
   },
   {
     provider: "claudeAgent",
@@ -112,6 +113,7 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
         },
       },
     ],
+    features: { supportsConversationRollback: true },
   },
 ];
 
@@ -368,9 +370,14 @@ describe("TraitsPicker (Claude)", () => {
 
 // ── Codex TraitsPicker tests ──────────────────────────────────────────
 
-async function mountCodexPicker(props: { model?: string; options?: CodexModelOptions }) {
+async function mountCodexPicker(props: {
+  model?: string;
+  options?: CodexModelOptions;
+  models?: (typeof TEST_PROVIDERS)[0]["models"];
+}) {
   const threadId = ThreadId.makeUnsafe("thread-codex-traits");
   const model = props.model ?? DEFAULT_MODEL_BY_PROVIDER.codex;
+  const models = props.models ?? TEST_PROVIDERS[0]!.models;
   const draftsByThreadId: Record<ThreadId, ComposerThreadDraftState> = {
     [threadId]: {
       prompt: "",
@@ -403,7 +410,7 @@ async function mountCodexPicker(props: { model?: string; options?: CodexModelOpt
   const screen = await render(
     <TraitsPicker
       provider="codex"
-      models={TEST_PROVIDERS[0]!.models}
+      models={models}
       threadId={threadId}
       model={props.model ?? DEFAULT_MODEL_BY_PROVIDER.codex}
       prompt=""
@@ -488,6 +495,30 @@ describe("TraitsPicker (Codex)", () => {
     expect(useComposerDraftStore.getState().stickyModelSelectionByProvider.codex).toMatchObject({
       provider: "codex",
       options: { fastMode: true },
+    });
+  });
+
+  it("does not render an empty trigger when the model has no trait controls", async () => {
+    await using _ = await mountCodexPicker({
+      model: "gpt-5.3-codex-spark",
+      models: [
+        {
+          slug: "gpt-5.3-codex-spark",
+          name: "GPT-5.3 Codex Spark",
+          isCustom: false,
+          capabilities: {
+            reasoningEffortLevels: [],
+            supportsFastMode: false,
+            supportsThinkingToggle: false,
+            contextWindowOptions: [],
+            promptInjectedEffortLevels: [],
+          },
+        },
+      ],
+    });
+
+    await vi.waitFor(() => {
+      expect(document.querySelector("button")).toBeNull();
     });
   });
 });

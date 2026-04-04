@@ -56,6 +56,11 @@ export const ServerProviderModel = Schema.Struct({
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;
 
+export const ServerProviderFeatures = Schema.Struct({
+  supportsConversationRollback: Schema.Boolean,
+});
+export type ServerProviderFeatures = typeof ServerProviderFeatures.Type;
+
 export const ServerProvider = Schema.Struct({
   provider: ProviderKind,
   enabled: Schema.Boolean,
@@ -66,6 +71,7 @@ export const ServerProvider = Schema.Struct({
   checkedAt: IsoDateTime,
   message: Schema.optional(TrimmedNonEmptyString),
   models: Schema.Array(ServerProviderModel),
+  features: ServerProviderFeatures,
 });
 export type ServerProvider = typeof ServerProvider.Type;
 

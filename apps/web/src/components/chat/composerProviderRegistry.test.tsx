@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ServerProviderModel } from "@t3tools/contracts";
-import { getComposerProviderState } from "./composerProviderRegistry";
+import {
+  getComposerProviderState,
+  renderProviderTraitsMenuContent,
+  renderProviderTraitsPicker,
+} from "./composerProviderRegistry";
+import { ThreadId } from "@t3tools/contracts";
 
 const CODEX_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
@@ -15,6 +20,21 @@ const CODEX_MODELS: ReadonlyArray<ServerProviderModel> = [
         { value: "low", label: "Low" },
       ],
       supportsFastMode: true,
+      supportsThinkingToggle: false,
+      contextWindowOptions: [],
+      promptInjectedEffortLevels: [],
+    },
+  },
+];
+
+const CODEX_MODELS_WITHOUT_TRAITS: ReadonlyArray<ServerProviderModel> = [
+  {
+    slug: "gpt-5.3-codex-spark",
+    name: "GPT-5.3 Codex Spark",
+    isCustom: false,
+    capabilities: {
+      reasoningEffortLevels: [],
+      supportsFastMode: false,
       supportsThinkingToggle: false,
       contextWindowOptions: [],
       promptInjectedEffortLevels: [],
@@ -415,5 +435,33 @@ describe("getComposerProviderState", () => {
     });
 
     expect(state.modelOptionsForDispatch).not.toHaveProperty("fastMode");
+  });
+
+  it("does not render a traits picker element when the model has no trait controls", () => {
+    const traitsPicker = renderProviderTraitsPicker({
+      provider: "codex",
+      threadId: ThreadId.makeUnsafe("thread-no-traits"),
+      model: "gpt-5.3-codex-spark",
+      models: CODEX_MODELS_WITHOUT_TRAITS,
+      modelOptions: undefined,
+      prompt: "",
+      onPromptChange: () => {},
+    });
+
+    expect(traitsPicker).toBeNull();
+  });
+
+  it("does not render traits menu content when the model has no trait controls", () => {
+    const traitsMenuContent = renderProviderTraitsMenuContent({
+      provider: "codex",
+      threadId: ThreadId.makeUnsafe("thread-no-traits"),
+      model: "gpt-5.3-codex-spark",
+      models: CODEX_MODELS_WITHOUT_TRAITS,
+      modelOptions: undefined,
+      prompt: "",
+      onPromptChange: () => {},
+    });
+
+    expect(traitsMenuContent).toBeNull();
   });
 });

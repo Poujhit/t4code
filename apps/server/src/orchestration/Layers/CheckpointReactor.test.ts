@@ -94,7 +94,8 @@ function createProviderServiceHarness(
     respondToUserInput: () => unsupported(),
     stopSession: () => unsupported(),
     listSessions,
-    getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+    getCapabilities: () =>
+      Effect.succeed({ sessionModelSwitch: "in-session", supportsConversationRollback: true }),
     rollbackConversation,
     streamEvents: Stream.fromPubSub(runtimeEventPubSub),
   };
