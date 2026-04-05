@@ -225,15 +225,15 @@ function estimateThreadPlanCatalogEntrySize(thread: Thread): number {
   return Math.max(
     64,
     thread.id.length +
-    thread.proposedPlans.reduce(
-      (total, plan) =>
-        total +
-        plan.id.length +
-        plan.planMarkdown.length +
-        plan.updatedAt.length +
-        (plan.turnId?.length ?? 0),
-      0,
-    ),
+      thread.proposedPlans.reduce(
+        (total, plan) =>
+          total +
+          plan.id.length +
+          plan.planMarkdown.length +
+          plan.updatedAt.length +
+          (plan.turnId?.length ?? 0),
+        0,
+      ),
   );
 }
 
@@ -461,9 +461,9 @@ function PersistentThreadTerminalDrawer({
       launchContext?.cwd ??
       (project
         ? projectScriptCwd({
-          project: { cwd: project.cwd },
-          worktreePath: effectiveWorktreePath,
-        })
+            project: { cwd: project.cwd },
+            worktreePath: effectiveWorktreePath,
+          })
         : null),
     [effectiveWorktreePath, launchContext?.cwd, project],
   );
@@ -471,9 +471,9 @@ function PersistentThreadTerminalDrawer({
     () =>
       project
         ? projectScriptRuntimeEnv({
-          project: { cwd: project.cwd },
-          worktreePath: effectiveWorktreePath,
-        })
+            project: { cwd: project.cwd },
+            worktreePath: effectiveWorktreePath,
+          })
         : {},
     [effectiveWorktreePath, project],
   );
@@ -835,14 +835,14 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
     () =>
       draftThread
         ? buildLocalDraftThread(
-          threadId,
-          draftThread,
-          fallbackDraftProject?.defaultModelSelection ?? {
-            provider: "codex",
-            model: DEFAULT_MODEL_BY_PROVIDER.codex,
-          },
-          localDraftError,
-        )
+            threadId,
+            draftThread,
+            fallbackDraftProject?.defaultModelSelection ?? {
+              provider: "codex",
+              model: DEFAULT_MODEL_BY_PROVIDER.codex,
+            },
+            localDraftError,
+          )
         : undefined,
     [draftThread, fallbackDraftProject?.defaultModelSelection, localDraftError, threadId],
   );
@@ -1075,10 +1075,10 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
     () =>
       activePendingUserInput
         ? derivePendingUserInputProgress(
-          activePendingUserInput.questions,
-          activePendingDraftAnswers,
-          activePendingQuestionIndex,
-        )
+            activePendingUserInput.questions,
+            activePendingDraftAnswers,
+            activePendingQuestionIndex,
+          )
         : null,
     [activePendingDraftAnswers, activePendingQuestionIndex, activePendingUserInput],
   );
@@ -1281,42 +1281,42 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
       Object.keys(attachmentPreviewHandoffByMessageId).length === 0
         ? messages
         : // Spread only fires for the few messages that actually changed;
-        // unchanged ones early-return their original reference.
-        // In-place mutation would break React's immutable state contract.
-        // oxlint-disable-next-line no-map-spread
-        messages.map((message) => {
-          if (
-            message.role !== "user" ||
-            !message.attachments ||
-            message.attachments.length === 0
-          ) {
-            return message;
-          }
-          const handoffPreviewUrls = attachmentPreviewHandoffByMessageId[message.id];
-          if (!handoffPreviewUrls || handoffPreviewUrls.length === 0) {
-            return message;
-          }
+          // unchanged ones early-return their original reference.
+          // In-place mutation would break React's immutable state contract.
+          // oxlint-disable-next-line no-map-spread
+          messages.map((message) => {
+            if (
+              message.role !== "user" ||
+              !message.attachments ||
+              message.attachments.length === 0
+            ) {
+              return message;
+            }
+            const handoffPreviewUrls = attachmentPreviewHandoffByMessageId[message.id];
+            if (!handoffPreviewUrls || handoffPreviewUrls.length === 0) {
+              return message;
+            }
 
-          let changed = false;
-          let imageIndex = 0;
-          const attachments = message.attachments.map((attachment) => {
-            if (attachment.type !== "image") {
-              return attachment;
-            }
-            const handoffPreviewUrl = handoffPreviewUrls[imageIndex];
-            imageIndex += 1;
-            if (!handoffPreviewUrl || attachment.previewUrl === handoffPreviewUrl) {
-              return attachment;
-            }
-            changed = true;
-            return {
-              ...attachment,
-              previewUrl: handoffPreviewUrl,
-            };
+            let changed = false;
+            let imageIndex = 0;
+            const attachments = message.attachments.map((attachment) => {
+              if (attachment.type !== "image") {
+                return attachment;
+              }
+              const handoffPreviewUrl = handoffPreviewUrls[imageIndex];
+              imageIndex += 1;
+              if (!handoffPreviewUrl || attachment.previewUrl === handoffPreviewUrl) {
+                return attachment;
+              }
+              changed = true;
+              return {
+                ...attachment,
+                previewUrl: handoffPreviewUrl,
+              };
+            });
+
+            return changed ? { ...message, attachments } : message;
           });
-
-          return changed ? { ...message, attachments } : message;
-        });
 
     if (optimisticUserMessages.length === 0) {
       return serverMessagesWithPreviewHandoff;
@@ -1397,9 +1397,9 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
   }, [activeLatestTurn, completionSummary, latestTurnSettled, timelineEntries]);
   const gitCwd = activeProject
     ? projectScriptCwd({
-      project: { cwd: activeProject.cwd },
-      worktreePath: activeThread?.worktreePath ?? null,
-    })
+        project: { cwd: activeProject.cwd },
+        worktreePath: activeThread?.worktreePath ?? null,
+      })
     : null;
   const composerTriggerKind = composerTrigger?.kind ?? null;
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
@@ -1789,21 +1789,21 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
       });
       const openTerminalInput: TerminalOpenInput = shouldCreateNewTerminal
         ? {
-          threadId: activeThreadId,
-          terminalId: targetTerminalId,
-          cwd: targetCwd,
-          ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
-          env: runtimeEnv,
-          cols: SCRIPT_TERMINAL_COLS,
-          rows: SCRIPT_TERMINAL_ROWS,
-        }
+            threadId: activeThreadId,
+            terminalId: targetTerminalId,
+            cwd: targetCwd,
+            ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
+            env: runtimeEnv,
+            cols: SCRIPT_TERMINAL_COLS,
+            rows: SCRIPT_TERMINAL_ROWS,
+          }
         : {
-          threadId: activeThreadId,
-          terminalId: targetTerminalId,
-          cwd: targetCwd,
-          ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
-          env: runtimeEnv,
-        };
+            threadId: activeThreadId,
+            terminalId: targetTerminalId,
+            cwd: targetCwd,
+            ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
+            env: runtimeEnv,
+          };
 
       try {
         await api.terminal.open(openTerminalInput);
@@ -1881,11 +1881,11 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
       };
       const nextScripts = input.runOnWorktreeCreate
         ? [
-          ...activeProject.scripts.map((script) =>
-            script.runOnWorktreeCreate ? { ...script, runOnWorktreeCreate: false } : script,
-          ),
-          nextScript,
-        ]
+            ...activeProject.scripts.map((script) =>
+              script.runOnWorktreeCreate ? { ...script, runOnWorktreeCreate: false } : script,
+            ),
+            nextScript,
+          ]
         : [...activeProject.scripts, nextScript];
 
       await persistProjectScripts({
@@ -2044,7 +2044,7 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
         (input.modelSelection.model !== serverThread.modelSelection.model ||
           input.modelSelection.provider !== serverThread.modelSelection.provider ||
           JSON.stringify(input.modelSelection.options ?? null) !==
-          JSON.stringify(serverThread.modelSelection.options ?? null))
+            JSON.stringify(serverThread.modelSelection.options ?? null))
       ) {
         await api.orchestration.dispatchCommand({
           type: "thread.meta.update",
@@ -3078,31 +3078,31 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
       const bootstrap =
         isLocalDraftThread || baseBranchForWorktree
           ? {
-            ...(isLocalDraftThread
-              ? {
-                createThread: {
-                  projectId: activeProject.id,
-                  title,
-                  modelSelection: threadCreateModelSelection,
-                  runtimeMode,
-                  interactionMode,
-                  branch: activeThread.branch,
-                  worktreePath: activeThread.worktreePath,
-                  createdAt: activeThread.createdAt,
-                },
-              }
-              : {}),
-            ...(baseBranchForWorktree
-              ? {
-                prepareWorktree: {
-                  projectCwd: activeProject.cwd,
-                  baseBranch: baseBranchForWorktree,
-                  branch: buildTemporaryWorktreeBranchName(),
-                },
-                runSetupScript: true,
-              }
-              : {}),
-          }
+              ...(isLocalDraftThread
+                ? {
+                    createThread: {
+                      projectId: activeProject.id,
+                      title,
+                      modelSelection: threadCreateModelSelection,
+                      runtimeMode,
+                      interactionMode,
+                      branch: activeThread.branch,
+                      worktreePath: activeThread.worktreePath,
+                      createdAt: activeThread.createdAt,
+                    },
+                  }
+                : {}),
+              ...(baseBranchForWorktree
+                ? {
+                    prepareWorktree: {
+                      projectCwd: activeProject.cwd,
+                      baseBranch: baseBranchForWorktree,
+                      branch: buildTemporaryWorktreeBranchName(),
+                    },
+                    runSetupScript: true,
+                  }
+                : {}),
+            }
           : undefined;
       beginLocalDispatch({ preparingWorktree: false });
       await api.orchestration.dispatchCommand({
@@ -3395,11 +3395,11 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
           interactionMode: nextInteractionMode,
           ...(nextInteractionMode === "default" && activeProposedPlan
             ? {
-              sourceProposedPlan: {
-                threadId: activeThread.id,
-                planId: activeProposedPlan.id,
-              },
-            }
+                sourceProposedPlan: {
+                  threadId: activeThread.id,
+                  planId: activeProposedPlan.id,
+                },
+              }
             : {}),
           createdAt: messageCreatedAt,
         });
@@ -3923,12 +3923,19 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
     setExpandedImage(preview);
   }, []);
   const expandedImageItem = expandedImage ? expandedImage.images[expandedImage.index] : null;
-  const onSelectChangedFile = useCallback(
-    (turnId: TurnId, filePath: string) => {
-      if (gitCwd) {
-        setWorkspaceOpen(true);
-        revealWorkspaceFile(threadId, filePath);
+  const onOpenChangedFile = useCallback(
+    (_turnId: TurnId, filePath: string) => {
+      if (!gitCwd) {
+        return;
       }
+
+      setWorkspaceOpen(true);
+      revealWorkspaceFile(threadId, filePath);
+    },
+    [gitCwd, revealWorkspaceFile, setWorkspaceOpen, threadId],
+  );
+  const onOpenTurnDiff = useCallback(
+    (turnId: TurnId, filePath: string) => {
       void navigate({
         to: "/$threadId",
         params: { threadId },
@@ -3938,7 +3945,7 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
         },
       });
     },
-    [gitCwd, navigate, revealWorkspaceFile, setWorkspaceOpen, threadId],
+    [navigate, threadId],
   );
   const onOpenChangedFileInCodeEditor = useCallback(
     (_turnId: TurnId, filePath: string) => {
@@ -4074,7 +4081,8 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
                 nowIso={nowIso}
                 expandedWorkGroups={expandedWorkGroups}
                 onToggleWorkGroup={onToggleWorkGroup}
-                onSelectChangedFile={onSelectChangedFile}
+                onOpenChangedFile={onOpenChangedFile}
+                onOpenTurnDiff={onOpenTurnDiff}
                 onOpenChangedFileInCodeEditor={onOpenChangedFileInCodeEditor}
                 revertTurnCountByUserMessageId={
                   supportsCheckpointRevert ? revertTurnCountByUserMessageId : new Map()
@@ -4321,9 +4329,9 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
                           modelOptionsByProvider={modelOptionsByProvider}
                           {...(composerProviderState.modelPickerIconClassName
                             ? {
-                              activeProviderIconClassName:
-                                composerProviderState.modelPickerIconClassName,
-                            }
+                                activeProviderIconClassName:
+                                  composerProviderState.modelPickerIconClassName,
+                              }
                             : {})}
                           onProviderModelChange={onProviderModelSelect}
                         />
@@ -4457,12 +4465,12 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
                           pendingAction={
                             activePendingProgress
                               ? {
-                                questionIndex: activePendingProgress.questionIndex,
-                                isLastQuestion: activePendingProgress.isLastQuestion,
-                                canAdvance: activePendingProgress.canAdvance,
-                                isResponding: activePendingIsResponding,
-                                isComplete: Boolean(activePendingResolvedAnswers),
-                              }
+                                  questionIndex: activePendingProgress.questionIndex,
+                                  isLastQuestion: activePendingProgress.isLastQuestion,
+                                  canAdvance: activePendingProgress.canAdvance,
+                                  isResponding: activePendingIsResponding,
+                                  isComplete: Boolean(activePendingResolvedAnswers),
+                                }
                               : null
                           }
                           isRunning={phase === "running"}
