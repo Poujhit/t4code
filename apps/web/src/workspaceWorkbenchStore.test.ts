@@ -30,6 +30,7 @@ describe("workspaceWorkbenchStore", () => {
       baseMtimeMsByThreadIdAndPath: {},
       isDirtyByThreadIdAndPath: {},
       lastLoadErrorByThreadIdAndPath: {},
+      aiReviewStateByThreadIdAndPath: {},
     });
   });
 

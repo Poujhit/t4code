@@ -84,7 +84,8 @@ describe("MessagesTimeline", () => {
         nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
-        onSelectChangedFile={() => {}}
+        onOpenChangedFile={() => {}}
+        onOpenTurnDiff={() => {}}
         onOpenChangedFileInCodeEditor={() => {}}
         revertTurnCountByUserMessageId={new Map()}
         onRevertUserMessage={() => {}}
@@ -132,7 +133,8 @@ describe("MessagesTimeline", () => {
         nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
-        onSelectChangedFile={() => {}}
+        onOpenChangedFile={() => {}}
+        onOpenTurnDiff={() => {}}
         onOpenChangedFileInCodeEditor={() => {}}
         revertTurnCountByUserMessageId={new Map()}
         onRevertUserMessage={() => {}}
@@ -197,7 +199,8 @@ describe("MessagesTimeline", () => {
         nowIso="2026-03-17T19:12:30.000Z"
         expandedWorkGroups={{}}
         onToggleWorkGroup={() => {}}
-        onSelectChangedFile={() => {}}
+        onOpenChangedFile={() => {}}
+        onOpenTurnDiff={() => {}}
         onOpenChangedFileInCodeEditor={() => {}}
         revertTurnCountByUserMessageId={new Map()}
         onRevertUserMessage={() => {}}

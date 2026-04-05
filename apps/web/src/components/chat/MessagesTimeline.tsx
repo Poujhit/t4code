@@ -78,7 +78,8 @@ interface MessagesTimelineProps {
   nowIso: string;
   expandedWorkGroups: Record<string, boolean>;
   onToggleWorkGroup: (groupId: string) => void;
-  onSelectChangedFile: (turnId: TurnId, filePath: string) => void;
+  onOpenChangedFile: (turnId: TurnId, filePath: string) => void;
+  onOpenTurnDiff: (turnId: TurnId, filePath: string) => void;
   onOpenChangedFileInCodeEditor: (turnId: TurnId, filePath: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
@@ -116,7 +117,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   nowIso,
   expandedWorkGroups,
   onToggleWorkGroup,
-  onSelectChangedFile,
+  onOpenChangedFile,
+  onOpenTurnDiff,
   onOpenChangedFileInCodeEditor,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
@@ -316,9 +318,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       setSelectedFileByTurnId((current) =>
         current[turnId] === filePath ? current : { ...current, [turnId]: filePath },
       );
-      onSelectChangedFile(turnId, filePath);
+      onOpenChangedFile(turnId, filePath);
     },
-    [onSelectChangedFile],
+    [onOpenChangedFile],
   );
   const openFileInEditor = useCallback(
     (turnId: TurnId, filePath: string) => {
@@ -530,7 +532,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                             variant="outline"
                             onClick={() => {
                               if (!selectedFile) return;
-                              selectFile(turnSummary.turnId, selectedFile);
+                              onOpenTurnDiff(turnSummary.turnId, selectedFile);
                             }}
                           >
                             View diff

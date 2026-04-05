@@ -97,7 +97,9 @@ function createProviderServiceHarness(
     getCapabilities: () =>
       Effect.succeed({ sessionModelSwitch: "in-session", supportsConversationRollback: true }),
     rollbackConversation,
-    streamEvents: Stream.fromPubSub(runtimeEventPubSub),
+    get streamEvents() {
+      return Stream.fromPubSub(runtimeEventPubSub);
+    },
   };
 
   const emit = (event: LegacyProviderRuntimeEvent): void => {
