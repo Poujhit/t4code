@@ -202,6 +202,7 @@ import {
   useServerConfig,
   useServerKeybindings,
 } from "~/rpc/serverState";
+import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -1615,17 +1616,18 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
   const setThreadError = useCallback(
     (targetThreadId: ThreadId | null, error: string | null) => {
       if (!targetThreadId) return;
+      const nextError = sanitizeThreadErrorMessage(error);
       if (useStore.getState().threads.some((thread) => thread.id === targetThreadId)) {
-        setStoreThreadError(targetThreadId, error);
+        setStoreThreadError(targetThreadId, nextError);
         return;
       }
       setLocalDraftErrorsByThreadId((existing) => {
-        if ((existing[targetThreadId] ?? null) === error) {
+        if ((existing[targetThreadId] ?? null) === nextError) {
           return existing;
         }
         return {
           ...existing,
-          [targetThreadId]: error,
+          [targetThreadId]: nextError,
         };
       });
     },
@@ -3185,14 +3187,14 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
           createdAt: new Date().toISOString(),
         })
         .catch((err: unknown) => {
-          setStoreThreadError(
+          setThreadError(
             activeThreadId,
             err instanceof Error ? err.message : "Failed to submit approval decision.",
           );
         });
       setRespondingRequestIds((existing) => existing.filter((id) => id !== requestId));
     },
-    [activeThreadId, setStoreThreadError],
+    [activeThreadId, setThreadError],
   );
 
   const onRespondToUserInput = useCallback(
@@ -3213,14 +3215,14 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
           createdAt: new Date().toISOString(),
         })
         .catch((err: unknown) => {
-          setStoreThreadError(
+          setThreadError(
             activeThreadId,
             err instanceof Error ? err.message : "Failed to submit user input.",
           );
         });
       setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
     },
-    [activeThreadId, setStoreThreadError],
+    [activeThreadId, setThreadError],
   );
 
   const setActivePendingUserInputQuestionIndex = useCallback(

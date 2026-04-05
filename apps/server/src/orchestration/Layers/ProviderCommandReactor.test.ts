@@ -209,7 +209,9 @@ describe("ProviderCommandReactor", () => {
           supportsConversationRollback: true,
         }),
       rollbackConversation: () => unsupported(),
-      streamEvents: Stream.fromPubSub(runtimeEventPubSub),
+      get streamEvents() {
+        return Stream.fromPubSub(runtimeEventPubSub);
+      },
     };
 
     const orchestrationLayer = OrchestrationEngineLive.pipe(
