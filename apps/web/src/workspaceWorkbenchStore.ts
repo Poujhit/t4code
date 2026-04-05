@@ -1,6 +1,7 @@
-import type { ThreadId } from "@t3tools/contracts";
+import type { ThreadId, TurnId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import type { AiReviewHunk } from "~/lib/aiReviewDiff";
 
 interface WorkspaceThreadState {
   rootPath: string | null;
@@ -13,6 +14,14 @@ export interface WorkspaceFileErrorState {
   message: string;
 }
 
+export interface WorkspaceAiReviewState {
+  turnId: TurnId;
+  snapshotContents: string;
+  hunks: AiReviewHunk[];
+  acceptedHunkIds: string[];
+  status: "active" | "completed" | "invalidated";
+}
+
 interface WorkspaceWorkbenchStoreState {
   isWorkspaceOpen: boolean;
   workspacePaneWidth: number;
@@ -23,6 +32,7 @@ interface WorkspaceWorkbenchStoreState {
   baseMtimeMsByThreadIdAndPath: Record<string, number>;
   isDirtyByThreadIdAndPath: Record<string, boolean>;
   lastLoadErrorByThreadIdAndPath: Record<string, WorkspaceFileErrorState>;
+  aiReviewStateByThreadIdAndPath: Record<string, WorkspaceAiReviewState>;
   setWorkspaceOpen: (open: boolean) => void;
   toggleWorkspaceOpen: () => void;
   setWorkspacePaneWidth: (width: number, reservedWidth?: number) => void;
@@ -50,6 +60,10 @@ interface WorkspaceWorkbenchStoreState {
     input: { contents: string; mtimeMs: number },
   ) => void;
   setFileError: (threadId: ThreadId, path: string, error: WorkspaceFileErrorState | null) => void;
+  setAiReviewState: (threadId: ThreadId, path: string, input: WorkspaceAiReviewState) => void;
+  acceptAiReviewHunk: (threadId: ThreadId, path: string, hunkId: string) => void;
+  invalidateAiReviewState: (threadId: ThreadId, path: string) => void;
+  clearAiReviewState: (threadId: ThreadId, path: string) => void;
   clearThreadState: (threadId: ThreadId) => void;
 }
 
@@ -254,6 +268,7 @@ export function partializeWorkspaceWorkbenchState(state: WorkspaceWorkbenchStore
     baseMtimeMsByThreadIdAndPath: state.baseMtimeMsByThreadIdAndPath,
     isDirtyByThreadIdAndPath: state.isDirtyByThreadIdAndPath,
     lastLoadErrorByThreadIdAndPath: state.lastLoadErrorByThreadIdAndPath,
+    aiReviewStateByThreadIdAndPath: state.aiReviewStateByThreadIdAndPath,
   };
 }
 
@@ -269,6 +284,7 @@ export const useWorkspaceWorkbenchStore = create<WorkspaceWorkbenchStoreState>()
       baseMtimeMsByThreadIdAndPath: {},
       isDirtyByThreadIdAndPath: {},
       lastLoadErrorByThreadIdAndPath: {},
+      aiReviewStateByThreadIdAndPath: {},
       setWorkspaceOpen: (open) =>
         set((state) => (state.isWorkspaceOpen === open ? state : { isWorkspaceOpen: open })),
       toggleWorkspaceOpen: () => set((state) => ({ isWorkspaceOpen: !state.isWorkspaceOpen })),
@@ -317,6 +333,10 @@ export const useWorkspaceWorkbenchStore = create<WorkspaceWorkbenchStoreState>()
             ),
             lastLoadErrorByThreadIdAndPath: clearThreadScopedRecord(
               state.lastLoadErrorByThreadIdAndPath,
+              threadId,
+            ),
+            aiReviewStateByThreadIdAndPath: clearThreadScopedRecord(
+              state.aiReviewStateByThreadIdAndPath,
               threadId,
             ),
           };
@@ -517,6 +537,64 @@ export const useWorkspaceWorkbenchStore = create<WorkspaceWorkbenchStoreState>()
               ? deleteThreadScopedValue(state.lastLoadErrorByThreadIdAndPath, threadId, path)
               : setThreadScopedValue(state.lastLoadErrorByThreadIdAndPath, threadId, path, error),
         })),
+      setAiReviewState: (threadId, path, input) =>
+        set((state) => ({
+          aiReviewStateByThreadIdAndPath: setThreadScopedValue(
+            state.aiReviewStateByThreadIdAndPath,
+            threadId,
+            path,
+            input,
+          ),
+        })),
+      acceptAiReviewHunk: (threadId, path, hunkId) =>
+        set((state) => {
+          const key = workspaceFileStateKey(threadId, path);
+          const current = state.aiReviewStateByThreadIdAndPath[key];
+          if (!current || current.status !== "active" || current.acceptedHunkIds.includes(hunkId)) {
+            return state;
+          }
+          const acceptedHunkIds = [...current.acceptedHunkIds, hunkId];
+          const allAccepted = current.hunks.every((hunk) => acceptedHunkIds.includes(hunk.id));
+          return {
+            aiReviewStateByThreadIdAndPath: setThreadScopedValue(
+              state.aiReviewStateByThreadIdAndPath,
+              threadId,
+              path,
+              {
+                ...current,
+                acceptedHunkIds,
+                status: allAccepted ? "completed" : "active",
+              },
+            ),
+          };
+        }),
+      invalidateAiReviewState: (threadId, path) =>
+        set((state) => {
+          const key = workspaceFileStateKey(threadId, path);
+          const current = state.aiReviewStateByThreadIdAndPath[key];
+          if (!current || current.status === "invalidated") {
+            return state;
+          }
+          return {
+            aiReviewStateByThreadIdAndPath: setThreadScopedValue(
+              state.aiReviewStateByThreadIdAndPath,
+              threadId,
+              path,
+              {
+                ...current,
+                status: "invalidated",
+              },
+            ),
+          };
+        }),
+      clearAiReviewState: (threadId, path) =>
+        set((state) => ({
+          aiReviewStateByThreadIdAndPath: deleteThreadScopedValue(
+            state.aiReviewStateByThreadIdAndPath,
+            threadId,
+            path,
+          ),
+        })),
       clearThreadState: (threadId) =>
         set((state) => ({
           threadStateByThreadId: updateThreadStateByThreadId(
@@ -542,6 +620,10 @@ export const useWorkspaceWorkbenchStore = create<WorkspaceWorkbenchStoreState>()
           ),
           lastLoadErrorByThreadIdAndPath: clearThreadScopedRecord(
             state.lastLoadErrorByThreadIdAndPath,
+            threadId,
+          ),
+          aiReviewStateByThreadIdAndPath: clearThreadScopedRecord(
+            state.aiReviewStateByThreadIdAndPath,
             threadId,
           ),
         })),

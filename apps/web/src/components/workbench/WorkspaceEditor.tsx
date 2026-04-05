@@ -1,8 +1,17 @@
 import { type ThreadId } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import {
+  Compartment,
+  EditorSelection,
+  EditorState,
+  RangeSetBuilder,
+  Text,
+  type Extension,
+} from "@codemirror/state";
+import {
+  Decoration,
   EditorView,
+  WidgetType,
   drawSelection,
   dropCursor,
   highlightActiveLine,
@@ -19,15 +28,28 @@ import { javascript } from "@codemirror/lang-javascript";
 import { markdown } from "@codemirror/lang-markdown";
 import { python } from "@codemirror/lang-python";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
+import { checkpointDiffQueryOptions } from "~/lib/providerReactQuery";
+import {
+  parseAiReviewHunksFromUnifiedDiff,
+  type AiReviewHunk,
+  type AiReviewLine,
+} from "~/lib/aiReviewDiff";
 import { readNativeApi } from "~/nativeApi";
 import { basenameOfPath } from "~/vscode-icons";
 import {
   projectReadFileQueryOptions,
   projectWriteFileMutationOptions,
 } from "~/lib/projectReactQuery";
-import { getSelectedLines, langForPath, type CodeSelection } from "~/lib/workspaceCodeSelection";
+import {
+  getSelectedLines,
+  langForPath,
+  lineLabel,
+  type CodeSelection,
+} from "~/lib/workspaceCodeSelection";
+import { useTurnDiffSummaries } from "~/hooks/useTurnDiffSummaries";
+import { useStore } from "~/store";
 import { useWorkspaceWorkbenchStore, workspaceFileStateKey } from "~/workspaceWorkbenchStore";
 import { WorkspaceEditorHeader } from "./WorkspaceEditorHeader";
 import { WorkspaceFileFallback } from "./WorkspaceFileFallback";
@@ -77,6 +99,80 @@ function readPrimarySelectionSnapshot(
     ...selected,
     relativePath,
   } satisfies CodeSelection;
+}
+
+function clampLineNumber(doc: Text, lineNumber: number): number {
+  return Math.max(1, Math.min(doc.lines, lineNumber));
+}
+
+function readLineRangeSelectionSnapshot(
+  doc: Text,
+  relativePath: string,
+  startLine: number,
+  endLine: number,
+): CodeSelection {
+  const safeStartLine = clampLineNumber(doc, startLine);
+  const safeEndLine = clampLineNumber(doc, Math.max(startLine, endLine));
+  const start = doc.line(safeStartLine);
+  const end = doc.line(safeEndLine);
+  return {
+    relativePath,
+    startLine: safeStartLine,
+    endLine: safeEndLine,
+    selectedText: doc.sliceString(start.from, end.to),
+  } satisfies CodeSelection;
+}
+
+function areAiReviewHunksEqual(
+  left: readonly AiReviewHunk[],
+  right: readonly AiReviewHunk[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((hunk, index) => {
+      const other = right[index];
+      return (
+        other !== undefined &&
+        hunk.id === other.id &&
+        hunk.startLine === other.startLine &&
+        hunk.endLine === other.endLine &&
+        hunk.deletedLines.length === other.deletedLines.length &&
+        hunk.deletedLines.every((line, lineIndex) => {
+          const otherLine = other.deletedLines[lineIndex];
+          return (
+            otherLine !== undefined &&
+            line.text === otherLine.text &&
+            line.emphasizedRanges.length === otherLine.emphasizedRanges.length &&
+            line.emphasizedRanges.every((range, rangeIndex) => {
+              const otherRange = otherLine.emphasizedRanges[rangeIndex];
+              return (
+                otherRange !== undefined &&
+                range.start === otherRange.start &&
+                range.end === otherRange.end
+              );
+            })
+          );
+        }) &&
+        hunk.addedLines.length === other.addedLines.length &&
+        hunk.addedLines.every((line, lineIndex) => {
+          const otherLine = other.addedLines[lineIndex];
+          return (
+            otherLine !== undefined &&
+            line.text === otherLine.text &&
+            line.emphasizedRanges.length === otherLine.emphasizedRanges.length &&
+            line.emphasizedRanges.every((range, rangeIndex) => {
+              const otherRange = otherLine.emphasizedRanges[rangeIndex];
+              return (
+                otherRange !== undefined &&
+                range.start === otherRange.start &&
+                range.end === otherRange.end
+              );
+            })
+          );
+        })
+      );
+    })
+  );
 }
 
 function editorTheme(_resolvedTheme: "light" | "dark"): Extension {
@@ -168,6 +264,66 @@ function editorTheme(_resolvedTheme: "light" | "dark"): Extension {
       "& .cm-line": {
         paddingLeft: "2px",
       },
+      "& .cm-ai-review-line": {
+        backgroundColor: "color-mix(in srgb, var(--background) 80%, var(--primary) 20%)",
+        boxShadow: "inset 3px 0 0 color-mix(in srgb, var(--primary) 72%, transparent)",
+      },
+      "& .cm-ai-review-inline-addition": {
+        borderRadius: "3px",
+        backgroundColor: "color-mix(in srgb, var(--background) 80%, var(--success) 20%)",
+        boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--success) 30%, transparent)",
+      },
+      "& .cm-ai-review-deleted-block": {
+        margin: "0",
+        padding: "0 0 0 2px",
+        backgroundColor: "color-mix(in srgb, var(--background) 84%, var(--destructive) 16%)",
+        boxShadow: "inset 3px 0 0 color-mix(in srgb, var(--destructive) 70%, transparent)",
+      },
+      "& .cm-ai-review-deleted-line": {
+        color: "color-mix(in srgb, var(--destructive) 84%, var(--foreground))",
+        opacity: "0.95",
+      },
+      "& .cm-ai-review-inline-deletion": {
+        borderRadius: "3px",
+        backgroundColor: "color-mix(in srgb, var(--background) 82%, var(--destructive) 18%)",
+        boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--destructive) 34%, transparent)",
+      },
+      "& .cm-ai-review-deleted-prefix": {
+        display: "inline-block",
+        width: "1ch",
+        color: "color-mix(in srgb, var(--destructive) 92%, var(--foreground))",
+      },
+      "& .cm-ai-review-header": {
+        margin: "0",
+        padding: "0 0 6px 0",
+      },
+      "& .cm-ai-review-actions": {
+        display: "flex",
+        alignItems: "center",
+        gap: "4px",
+        padding: "0 0 6px 2px",
+      },
+      "& .cm-ai-review-range": {
+        fontSize: "10px",
+        lineHeight: "1",
+        color: "var(--muted-foreground)",
+        whiteSpace: "nowrap",
+      },
+      "& .cm-ai-review-button": {
+        border: "1px solid color-mix(in srgb, var(--border) 80%, transparent)",
+        borderRadius: "999px",
+        backgroundColor: "color-mix(in srgb, var(--card) 90%, var(--background))",
+        color: "var(--foreground)",
+        fontSize: "10px",
+        fontWeight: "600",
+        lineHeight: "1",
+        padding: "3px 7px",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      },
+      "& .cm-ai-review-button:hover": {
+        backgroundColor: "color-mix(in srgb, var(--card) 78%, var(--foreground))",
+      },
       "& .cm-activeLine": {
         backgroundColor: "color-mix(in srgb, var(--muted) 38%, var(--background))",
       },
@@ -190,19 +346,246 @@ function editorTheme(_resolvedTheme: "light" | "dark"): Extension {
   );
 }
 
-function createEditorExtensions(params: {
+function editorBehaviorExtensions(readOnly: boolean): Extension[] {
+  return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)];
+}
+
+class ReviewHeaderWidget extends WidgetType {
+  constructor(
+    readonly hunkId: string,
+    readonly selection: CodeSelection,
+    readonly deletedLines: readonly AiReviewLine[],
+    readonly onAccept: (hunkId: string) => void,
+    readonly onAddToPrompt: (selection: CodeSelection) => void,
+  ) {
+    super();
+  }
+
+  override eq(other: ReviewHeaderWidget): boolean {
+    return (
+      this.hunkId === other.hunkId &&
+      this.selection.startLine === other.selection.startLine &&
+      this.selection.endLine === other.selection.endLine &&
+      this.deletedLines.length === other.deletedLines.length &&
+      this.deletedLines.every((line, index) => {
+        const otherLine = other.deletedLines[index];
+        return (
+          otherLine !== undefined &&
+          line.text === otherLine.text &&
+          line.emphasizedRanges.length === otherLine.emphasizedRanges.length &&
+          line.emphasizedRanges.every((range, rangeIndex) => {
+            const otherRange = otherLine.emphasizedRanges[rangeIndex];
+            return (
+              otherRange !== undefined &&
+              range.start === otherRange.start &&
+              range.end === otherRange.end
+            );
+          })
+        );
+      })
+    );
+  }
+
+  override toDOM() {
+    const wrapper = document.createElement("div");
+    wrapper.className = "cm-ai-review-header";
+
+    const actions = document.createElement("div");
+    actions.className = "cm-ai-review-actions";
+
+    const range = document.createElement("span");
+    range.className = "cm-ai-review-range";
+    range.textContent = lineLabel(this.selection.startLine, this.selection.endLine);
+    actions.append(range);
+
+    const acceptButton = document.createElement("button");
+    acceptButton.type = "button";
+    acceptButton.className = "cm-ai-review-button";
+    acceptButton.textContent = "Accept";
+    acceptButton.setAttribute(
+      "aria-label",
+      `Accept AI hunk for ${lineLabel(this.selection.startLine, this.selection.endLine)}`,
+    );
+    acceptButton.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    acceptButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.onAccept(this.hunkId);
+    });
+    actions.append(acceptButton);
+
+    const addToPromptButton = document.createElement("button");
+    addToPromptButton.type = "button";
+    addToPromptButton.className = "cm-ai-review-button";
+    addToPromptButton.textContent = "Add to prompt";
+    addToPromptButton.setAttribute(
+      "aria-label",
+      `Add AI hunk to prompt for ${lineLabel(this.selection.startLine, this.selection.endLine)}`,
+    );
+    addToPromptButton.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    addToPromptButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.onAddToPrompt(this.selection);
+    });
+    actions.append(addToPromptButton);
+    wrapper.append(actions);
+
+    if (this.deletedLines.length > 0) {
+      wrapper.append(new DeletedLinesWidget(this.deletedLines).toDOM());
+    }
+
+    return wrapper;
+  }
+}
+
+class DeletedLinesWidget extends WidgetType {
+  constructor(readonly deletedLines: readonly AiReviewLine[]) {
+    super();
+  }
+
+  override eq(other: DeletedLinesWidget): boolean {
+    return (
+      this.deletedLines.length === other.deletedLines.length &&
+      this.deletedLines.every((line, index) => {
+        const otherLine = other.deletedLines[index];
+        return (
+          otherLine !== undefined &&
+          line.text === otherLine.text &&
+          line.emphasizedRanges.length === otherLine.emphasizedRanges.length &&
+          line.emphasizedRanges.every((range, rangeIndex) => {
+            const otherRange = otherLine.emphasizedRanges[rangeIndex];
+            return (
+              otherRange !== undefined &&
+              range.start === otherRange.start &&
+              range.end === otherRange.end
+            );
+          })
+        );
+      })
+    );
+  }
+
+  override toDOM() {
+    const wrapper = document.createElement("div");
+    wrapper.className = "cm-ai-review-deleted-block";
+    for (const line of this.deletedLines) {
+      const row = document.createElement("div");
+      row.className = "cm-ai-review-deleted-line";
+      const prefix = document.createElement("span");
+      prefix.className = "cm-ai-review-deleted-prefix";
+      prefix.textContent = "-";
+      row.append(prefix);
+      appendAiReviewLineContent(row, line, "cm-ai-review-inline-deletion");
+      wrapper.append(row);
+    }
+    return wrapper;
+  }
+}
+
+function appendAiReviewLineContent(
+  parent: HTMLElement,
+  line: AiReviewLine,
+  emphasizedClassName: string,
+) {
+  let offset = 0;
+  for (const range of line.emphasizedRanges) {
+    const start = Math.max(offset, Math.min(line.text.length, range.start));
+    const end = Math.max(start, Math.min(line.text.length, range.end));
+    if (start > offset) {
+      parent.append(document.createTextNode(line.text.slice(offset, start)));
+    }
+    if (end > start) {
+      const span = document.createElement("span");
+      span.className = emphasizedClassName;
+      span.textContent = line.text.slice(start, end);
+      parent.append(span);
+    }
+    offset = end;
+  }
+  if (offset < line.text.length) {
+    parent.append(document.createTextNode(line.text.slice(offset)));
+  }
+}
+
+function createAiReviewExtensions(params: {
+  doc: Text;
   relativePath: string;
-  resolvedTheme: "light" | "dark";
+  reviewHunks: readonly AiReviewHunk[];
+  onAcceptHunk: (hunkId: string) => void;
+  onAddReviewHunkToPrompt: (selection: CodeSelection) => void;
+}): Extension[] {
+  if (params.reviewHunks.length === 0) {
+    return [];
+  }
+
+  const decorations = new RangeSetBuilder<Decoration>();
+
+  for (const hunk of params.reviewHunks) {
+    const selection = readLineRangeSelectionSnapshot(
+      params.doc,
+      params.relativePath,
+      hunk.startLine,
+      hunk.endLine,
+    );
+    decorations.add(
+      params.doc.line(selection.startLine).from,
+      params.doc.line(selection.startLine).from,
+      Decoration.widget({
+        widget: new ReviewHeaderWidget(
+          hunk.id,
+          selection,
+          hunk.deletedLines,
+          params.onAcceptHunk,
+          params.onAddReviewHunkToPrompt,
+        ),
+        block: true,
+        side: -1,
+      }),
+    );
+    for (let lineNumber = selection.startLine; lineNumber <= selection.endLine; lineNumber += 1) {
+      decorations.add(
+        params.doc.line(lineNumber).from,
+        params.doc.line(lineNumber).from,
+        Decoration.line({
+          attributes: {
+            class: "cm-ai-review-line",
+          },
+        }),
+      );
+      const addedLine = hunk.addedLines[lineNumber - selection.startLine];
+      if (!addedLine) {
+        continue;
+      }
+      const docLine = params.doc.line(lineNumber);
+      for (const range of addedLine.emphasizedRanges) {
+        const from = Math.min(docLine.to, docLine.from + range.start);
+        const to = Math.min(docLine.to, docLine.from + range.end);
+        if (to <= from) {
+          continue;
+        }
+        decorations.add(from, to, Decoration.mark({ class: "cm-ai-review-inline-addition" }));
+      }
+    }
+  }
+
+  return [EditorView.decorations.of(decorations.finish())];
+}
+
+function createBaseEditorExtensions(params: {
+  relativePath: string;
   onChange: (value: string) => void;
   onSave: () => void;
   onAddSelectionToPrompt: (selection: CodeSelection) => void;
 }) {
-  const languageExtension = languageExtensionForPath(params.relativePath);
-
   return [
     oneDark,
-    lineNumbers(),
-    highlightActiveLineGutter(),
     drawSelection(),
     dropCursor(),
     history(),
@@ -265,8 +648,6 @@ function createEditorExtensions(params: {
         return true;
       },
     }),
-    editorTheme(params.resolvedTheme),
-    ...(languageExtension ? [languageExtension] : []),
   ];
 }
 
@@ -277,13 +658,23 @@ function CodeMirrorEditor(props: {
   onChange: (value: string) => void;
   onSave: () => void;
   onAddSelectionToPrompt: (selection: CodeSelection) => void;
+  readOnly?: boolean;
+  reviewHunks?: readonly AiReviewHunk[];
+  onAcceptReviewHunk?: ((hunkId: string) => void) | null;
+  onAddReviewHunkToPrompt?: ((selection: CodeSelection) => void) | null;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const initialValueRef = useRef(props.value);
+  const languageCompartmentRef = useRef(new Compartment());
+  const themeCompartmentRef = useRef(new Compartment());
+  const behaviorCompartmentRef = useRef(new Compartment());
+  const reviewCompartmentRef = useRef(new Compartment());
   const onChangeEvent = useEffectEvent(props.onChange);
   const onSaveEvent = useEffectEvent(props.onSave);
   const onAddSelectionToPromptEvent = useEffectEvent(props.onAddSelectionToPrompt);
+  const onAcceptReviewHunkEvent = useEffectEvent(props.onAcceptReviewHunk ?? (() => {}));
+  const onAddReviewHunkToPromptEvent = useEffectEvent(props.onAddReviewHunkToPrompt ?? (() => {}));
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -292,13 +683,24 @@ function CodeMirrorEditor(props: {
 
     const state = EditorState.create({
       doc: initialValueRef.current,
-      extensions: createEditorExtensions({
-        relativePath: props.relativePath,
-        resolvedTheme: props.resolvedTheme,
-        onChange: (value) => onChangeEvent(value),
-        onSave: () => onSaveEvent(),
-        onAddSelectionToPrompt: (selection) => onAddSelectionToPromptEvent(selection),
-      }),
+      extensions: [
+        lineNumbers(),
+        highlightActiveLineGutter(),
+        languageCompartmentRef.current.of(
+          languageExtensionForPath(props.relativePath)
+            ? [languageExtensionForPath(props.relativePath)!]
+            : [],
+        ),
+        themeCompartmentRef.current.of(editorTheme("dark")),
+        behaviorCompartmentRef.current.of(editorBehaviorExtensions(false)),
+        reviewCompartmentRef.current.of([]),
+        ...createBaseEditorExtensions({
+          relativePath: props.relativePath,
+          onChange: (value) => onChangeEvent(value),
+          onSave: () => onSaveEvent(),
+          onAddSelectionToPrompt: (selection) => onAddSelectionToPromptEvent(selection),
+        }),
+      ],
     });
     const view = new EditorView({
       state,
@@ -309,7 +711,7 @@ function CodeMirrorEditor(props: {
       view.destroy();
       viewRef.current = null;
     };
-  }, [props.relativePath, props.resolvedTheme]);
+  }, [props.relativePath]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -317,15 +719,38 @@ function CodeMirrorEditor(props: {
       return;
     }
     const currentValue = view.state.doc.toString();
-    if (currentValue === props.value) {
-      return;
-    }
+    const documentChanged = currentValue !== props.value;
+    const nextDoc = documentChanged ? Text.of(props.value.split("\n")) : view.state.doc;
     const selection = view.state.selection.main;
     view.dispatch({
-      changes: { from: 0, to: currentValue.length, insert: props.value },
-      selection: EditorSelection.cursor(Math.min(selection.head, props.value.length)),
+      ...(documentChanged
+        ? {
+            changes: { from: 0, to: currentValue.length, insert: props.value },
+            selection: EditorSelection.cursor(Math.min(selection.head, props.value.length)),
+          }
+        : null),
+      effects: [
+        languageCompartmentRef.current.reconfigure(
+          languageExtensionForPath(props.relativePath)
+            ? [languageExtensionForPath(props.relativePath)!]
+            : [],
+        ),
+        themeCompartmentRef.current.reconfigure(editorTheme(props.resolvedTheme)),
+        behaviorCompartmentRef.current.reconfigure(
+          editorBehaviorExtensions(props.readOnly ?? false),
+        ),
+        reviewCompartmentRef.current.reconfigure(
+          createAiReviewExtensions({
+            doc: nextDoc,
+            relativePath: props.relativePath,
+            reviewHunks: props.reviewHunks ?? [],
+            onAcceptHunk: (hunkId) => onAcceptReviewHunkEvent(hunkId),
+            onAddReviewHunkToPrompt: (selection) => onAddReviewHunkToPromptEvent(selection),
+          }),
+        ),
+      ],
     });
-  }, [props.value]);
+  }, [props.readOnly, props.relativePath, props.resolvedTheme, props.reviewHunks, props.value]);
 
   return (
     <div className="workspace-editor-codemirror flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -346,6 +771,9 @@ export function WorkspaceEditor(props: {
 }) {
   const queryClient = useQueryClient();
   const draftKey = workspaceFileStateKey(props.threadId, props.relativePath);
+  const activeThread = useStore(
+    (state) => state.threads.find((thread) => thread.id === props.threadId) ?? null,
+  );
   const openFilePaths = useWorkspaceWorkbenchStore(
     (state) => state.openFilePathsByThreadId[props.threadId] ?? [],
   );
@@ -366,7 +794,19 @@ export function WorkspaceEditor(props: {
   const setDraftContent = useWorkspaceWorkbenchStore((state) => state.setDraftContent);
   const markFileSaved = useWorkspaceWorkbenchStore((state) => state.markFileSaved);
   const setFileError = useWorkspaceWorkbenchStore((state) => state.setFileError);
+  const aiReviewState = useWorkspaceWorkbenchStore(
+    (state) => state.aiReviewStateByThreadIdAndPath[draftKey] ?? null,
+  );
+  const setAiReviewState = useWorkspaceWorkbenchStore((state) => state.setAiReviewState);
+  const acceptAiReviewHunk = useWorkspaceWorkbenchStore((state) => state.acceptAiReviewHunk);
+  const invalidateAiReviewState = useWorkspaceWorkbenchStore(
+    (state) => state.invalidateAiReviewState,
+  );
+  const clearAiReviewState = useWorkspaceWorkbenchStore((state) => state.clearAiReviewState);
   const [isReloading, setIsReloading] = useState(false);
+  const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } = useTurnDiffSummaries(
+    activeThread ?? undefined,
+  );
 
   const fileQuery = useQuery(
     projectReadFileQueryOptions({
@@ -375,6 +815,60 @@ export function WorkspaceEditor(props: {
     }),
   );
   const saveMutation = useMutation(projectWriteFileMutationOptions({ queryClient }));
+  const latestAiReviewTurn = useMemo(() => {
+    return (
+      [...turnDiffSummaries]
+        .filter(
+          (summary) =>
+            (summary.status === undefined || summary.status === "ready") &&
+            summary.files.some((file) => file.path === props.relativePath),
+        )
+        .map((summary) => ({
+          summary,
+          turnCount:
+            summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId],
+        }))
+        .filter(
+          (
+            entry,
+          ): entry is {
+            summary: (typeof turnDiffSummaries)[number];
+            turnCount: number;
+          } => typeof entry.turnCount === "number",
+        )
+        .toSorted((left, right) => {
+          if (left.turnCount !== right.turnCount) {
+            return right.turnCount - left.turnCount;
+          }
+          return right.summary.completedAt.localeCompare(left.summary.completedAt);
+        })[0] ?? null
+    );
+  }, [inferredCheckpointTurnCountByTurnId, props.relativePath, turnDiffSummaries]);
+  const aiReviewDiffQuery = useQuery(
+    checkpointDiffQueryOptions({
+      threadId: props.threadId,
+      fromTurnCount: latestAiReviewTurn ? Math.max(0, latestAiReviewTurn.turnCount - 1) : null,
+      toTurnCount: latestAiReviewTurn?.turnCount ?? null,
+      cacheScope: latestAiReviewTurn
+        ? `workspace-ai-review:${props.threadId}:${props.relativePath}:${latestAiReviewTurn.summary.turnId}`
+        : null,
+      enabled: latestAiReviewTurn !== null,
+    }),
+  );
+  const parsedAiReviewHunks = useMemo(() => {
+    if (!aiReviewDiffQuery.data?.diff || !latestAiReviewTurn) {
+      return [];
+    }
+    try {
+      return parseAiReviewHunksFromUnifiedDiff(
+        aiReviewDiffQuery.data.diff,
+        props.relativePath,
+        `workspace-ai-review:${props.threadId}:${props.relativePath}:${latestAiReviewTurn.summary.turnId}`,
+      );
+    } catch {
+      return [];
+    }
+  }, [aiReviewDiffQuery.data?.diff, latestAiReviewTurn, props.relativePath, props.threadId]);
 
   useEffect(() => {
     if (openFilePaths.includes(props.relativePath)) {
@@ -399,6 +893,101 @@ export function WorkspaceEditor(props: {
     }
     setFileError(props.threadId, props.relativePath, classifyWorkspaceFileError(fileQuery.error));
   }, [fileQuery.error, fileQuery.isError, props.relativePath, props.threadId, setFileError]);
+
+  const currentContents = draftContent ?? fileQuery.data?.contents ?? "";
+  const latestDiskContents = fileQuery.data?.contents ?? "";
+  const currentDraftMatchesDisk = currentContents === latestDiskContents;
+
+  useEffect(() => {
+    if (!fileQuery.isSuccess || fileQuery.data.isBinary || fileQuery.data.isTooLarge) {
+      clearAiReviewState(props.threadId, props.relativePath);
+      return;
+    }
+    if (!latestAiReviewTurn) {
+      clearAiReviewState(props.threadId, props.relativePath);
+      return;
+    }
+    if (aiReviewDiffQuery.isPending) {
+      return;
+    }
+    if (aiReviewDiffQuery.isError || parsedAiReviewHunks.length === 0) {
+      clearAiReviewState(props.threadId, props.relativePath);
+      return;
+    }
+    if (!currentDraftMatchesDisk) {
+      if (
+        aiReviewState?.turnId === latestAiReviewTurn.summary.turnId &&
+        aiReviewState.status === "active"
+      ) {
+        invalidateAiReviewState(props.threadId, props.relativePath);
+      }
+      return;
+    }
+
+    if (aiReviewState?.turnId === latestAiReviewTurn.summary.turnId) {
+      if (aiReviewState.status === "invalidated" || aiReviewState.status === "completed") {
+        return;
+      }
+      if (
+        aiReviewState.snapshotContents === fileQuery.data.contents &&
+        areAiReviewHunksEqual(aiReviewState.hunks, parsedAiReviewHunks)
+      ) {
+        return;
+      }
+    }
+
+    const acceptedHunkIds =
+      aiReviewState?.turnId === latestAiReviewTurn.summary.turnId
+        ? aiReviewState.acceptedHunkIds.filter((hunkId) =>
+            parsedAiReviewHunks.some((hunk) => hunk.id === hunkId),
+          )
+        : [];
+    const allAccepted =
+      parsedAiReviewHunks.length > 0 &&
+      parsedAiReviewHunks.every((hunk) => acceptedHunkIds.includes(hunk.id));
+
+    setAiReviewState(props.threadId, props.relativePath, {
+      turnId: latestAiReviewTurn.summary.turnId,
+      snapshotContents: fileQuery.data.contents,
+      hunks: parsedAiReviewHunks,
+      acceptedHunkIds,
+      status: allAccepted ? "completed" : "active",
+    });
+  }, [
+    aiReviewDiffQuery.isError,
+    aiReviewDiffQuery.isPending,
+    aiReviewState,
+    clearAiReviewState,
+    currentDraftMatchesDisk,
+    fileQuery.data,
+    fileQuery.isSuccess,
+    invalidateAiReviewState,
+    latestAiReviewTurn,
+    parsedAiReviewHunks,
+    props.relativePath,
+    props.threadId,
+    setAiReviewState,
+  ]);
+
+  useEffect(() => {
+    if (!fileQuery.isSuccess || !aiReviewState || aiReviewState.status !== "active") {
+      return;
+    }
+    if (
+      aiReviewState.turnId !== latestAiReviewTurn?.summary.turnId ||
+      aiReviewState.snapshotContents !== fileQuery.data.contents
+    ) {
+      invalidateAiReviewState(props.threadId, props.relativePath);
+    }
+  }, [
+    aiReviewState,
+    fileQuery.data,
+    fileQuery.isSuccess,
+    invalidateAiReviewState,
+    latestAiReviewTurn,
+    props.relativePath,
+    props.threadId,
+  ]);
 
   const handleSave = useCallback(async () => {
     const contents = draftContent ?? fileQuery.data?.contents ?? "";
@@ -475,14 +1064,20 @@ export function WorkspaceEditor(props: {
     void fileQuery.refetch();
   }, [fileQuery, props.relativePath, props.threadId, setFileError]);
 
-  const currentContents = draftContent ?? fileQuery.data?.contents ?? "";
   const filename = basenameOfPath(props.relativePath);
+  const pendingAiReviewHunks =
+    aiReviewState?.status === "active"
+      ? aiReviewState.hunks.filter((hunk) => !aiReviewState.acceptedHunkIds.includes(hunk.id))
+      : [];
+  const isAiReviewActive = pendingAiReviewHunks.length > 0;
 
   let readOnlyLabel: string | null = null;
   if (fileQuery.data?.isBinary) {
     readOnlyLabel = "Binary";
   } else if (fileQuery.data?.isTooLarge) {
     readOnlyLabel = "Read only";
+  } else if (isAiReviewActive) {
+    readOnlyLabel = "AI review";
   } else if (activeFileError && activeFileError.kind !== "conflict") {
     readOnlyLabel = "Unavailable";
   }
@@ -558,6 +1153,14 @@ export function WorkspaceEditor(props: {
             relativePath={props.relativePath}
             value={currentContents}
             resolvedTheme={props.resolvedTheme}
+            readOnly={isAiReviewActive}
+            reviewHunks={pendingAiReviewHunks}
+            onAcceptReviewHunk={(hunkId) => {
+              acceptAiReviewHunk(props.threadId, props.relativePath, hunkId);
+            }}
+            onAddReviewHunkToPrompt={(selection) => {
+              props.onAddCodeSelectionToPrompt?.(selection);
+            }}
             onAddSelectionToPrompt={(selection) => {
               props.onAddCodeSelectionToPrompt?.(selection);
             }}
