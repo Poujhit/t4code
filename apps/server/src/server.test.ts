@@ -74,6 +74,7 @@ import {
   type ProjectSetupScriptRunnerShape,
 } from "./project/Services/ProjectSetupScriptRunner.ts";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
+import { WorkspaceContentSearchLive } from "./workspace/Layers/WorkspaceContentSearch.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 
@@ -129,6 +130,7 @@ const makeDefaultOrchestrationReadModel = () => {
 const workspaceAndProjectServicesLayer = Layer.mergeAll(
   WorkspacePathsLive,
   WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive)),
+  WorkspaceContentSearchLive.pipe(Layer.provide(WorkspacePathsLive)),
   WorkspaceFileSystemLive.pipe(
     Layer.provide(WorkspacePathsLive),
     Layer.provide(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
@@ -1147,6 +1149,76 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         result.failure.message,
         "Workspace root does not exist: /definitely/not/a/real/workspace/path",
       );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc projects.searchFileContents", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-ws-project-search-contents-",
+      });
+      yield* fs.writeFileString(
+        path.join(workspaceDir, "needle-file.ts"),
+        "export const needle = 1;\n",
+      );
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsSearchFileContents]({
+            cwd: workspaceDir,
+            query: "needle",
+            caseSensitive: false,
+            wholeWord: false,
+            regexp: false,
+            includeGlobs: [],
+            excludeGlobs: [],
+            limit: 20,
+          }),
+        ),
+      );
+
+      assert.isAtLeast(response.files.length, 1);
+      assert.equal(response.files[0]?.relativePath, "needle-file.ts");
+      assert.equal(response.files[0]?.matches[0]?.lineNumber, 1);
+      assert.equal(response.truncated, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc projects.searchFileContents errors", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-ws-project-search-contents-error-",
+      });
+      yield* fs.writeFileString(path.join(workspaceDir, "needle-file.ts"), "needle\n");
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsSearchFileContents]({
+            cwd: workspaceDir,
+            query: "[",
+            caseSensitive: false,
+            wholeWord: false,
+            regexp: true,
+            includeGlobs: [],
+            excludeGlobs: [],
+            limit: 20,
+          }),
+        ).pipe(Effect.result),
+      );
+
+      assertTrue(result._tag === "Failure");
+      assertTrue(result.failure._tag === "ProjectTextSearchError");
+      assertInclude(result.failure.message, "Failed to search workspace file contents");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

@@ -13,6 +13,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   ProjectListDirectoryError,
   ProjectReadFileError,
+  ProjectTextSearchError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
@@ -45,6 +46,7 @@ import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
 import { TerminalManager } from "./terminal/Services/Manager";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
+import { WorkspaceContentSearch } from "./workspace/Services/WorkspaceContentSearch";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
 import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptRunner";
@@ -65,6 +67,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const serverSettings = yield* ServerSettingsService;
     const startup = yield* ServerRuntimeStartup;
     const workspaceEntries = yield* WorkspaceEntries;
+    const workspaceContentSearch = yield* WorkspaceContentSearch;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
     const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
 
@@ -535,6 +538,20 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               (cause) =>
                 new ProjectSearchEntriesError({
                   message: `Failed to search workspace entries: ${cause.detail}`,
+                  cause,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "workspace" },
+        ),
+      [WS_METHODS.projectsSearchFileContents]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.projectsSearchFileContents,
+          workspaceContentSearch.search(input).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProjectTextSearchError({
+                  message: `Failed to search workspace file contents: ${cause.detail}`,
                   cause,
                 }),
             ),
