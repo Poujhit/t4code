@@ -36,6 +36,8 @@ function resetWorkbenchState() {
     isWorkspaceOpen: false,
     workspacePaneWidth: WORKSPACE_INLINE_DEFAULT_WIDTH,
     threadStateByThreadId: {},
+    paneModeByThreadId: {},
+    searchStateByThreadId: {},
     openFilePathsByThreadId: {},
     activeFilePathByThreadId: {},
     draftContentByThreadIdAndPath: {},
@@ -43,6 +45,9 @@ function resetWorkbenchState() {
     isDirtyByThreadIdAndPath: {},
     lastLoadErrorByThreadIdAndPath: {},
     aiReviewStateByThreadIdAndPath: {},
+    acceptedAiReviewHunksByKey: {},
+    editorFindRequestKeyByThreadId: {},
+    pendingRevealTargetByThreadId: {},
   });
 }
 
@@ -157,6 +162,7 @@ describe("WorkspaceWorkbench", () => {
       projects: {
         listDirectory,
         readFile,
+        searchFileContents: vi.fn(),
         searchEntries: vi.fn(),
         writeFile,
       },
@@ -167,10 +173,14 @@ describe("WorkspaceWorkbench", () => {
 
     const queryClient = new QueryClient();
     const host = document.createElement("div");
+    host.style.width = "960px";
+    host.style.height = "640px";
     document.body.append(host);
     const screen = await render(
       <QueryClientProvider client={queryClient}>
-        <WorkspaceWorkbench threadId={THREAD_ID} workspaceRoot="/repo" />
+        <div style={{ width: "960px", height: "640px" }}>
+          <WorkspaceWorkbench threadId={THREAD_ID} workspaceRoot="/repo" />
+        </div>
       </QueryClientProvider>,
       { container: host },
     );
@@ -256,6 +266,7 @@ describe("WorkspaceWorkbench", () => {
           isBinary: false,
           isTooLarge: false,
         })),
+        searchFileContents: vi.fn(),
         searchEntries: vi.fn(),
         writeFile: vi.fn(),
       },
@@ -386,6 +397,7 @@ describe("WorkspaceWorkbench", () => {
           isBinary: false,
           isTooLarge: false,
         })),
+        searchFileContents: vi.fn(),
         searchEntries: vi.fn(),
         writeFile: vi.fn(),
       },
@@ -538,6 +550,7 @@ describe("WorkspaceWorkbench", () => {
           isBinary: false,
           isTooLarge: false,
         })),
+        searchFileContents: vi.fn(),
         searchEntries: vi.fn(),
         writeFile: vi.fn(),
       },
@@ -641,6 +654,7 @@ describe("WorkspaceWorkbench", () => {
           isBinary: false,
           isTooLarge: false,
         })),
+        searchFileContents: vi.fn(),
         searchEntries: vi.fn(),
         writeFile: vi.fn(),
       },
@@ -745,6 +759,7 @@ describe("WorkspaceWorkbench", () => {
           isBinary: false,
           isTooLarge: false,
         })),
+        searchFileContents: vi.fn(),
         searchEntries: vi.fn(),
         writeFile: vi.fn(),
       },
@@ -863,6 +878,7 @@ describe("WorkspaceWorkbench", () => {
           isBinary: false,
           isTooLarge: false,
         })),
+        searchFileContents: vi.fn(),
         searchEntries: vi.fn(),
         writeFile: vi.fn(),
       },
@@ -921,6 +937,168 @@ describe("WorkspaceWorkbench", () => {
       expect(view.state.facet(EditorState.readOnly)).toBe(false);
       expect(document.querySelector('[aria-label^="Accept AI hunk"]')).toBeNull();
       expect(document.body.textContent ?? "").not.toContain("AI review");
+    });
+
+    await screen.unmount();
+    host.remove();
+  });
+
+  it("opens the editor find panel from the header action", async () => {
+    window.nativeApi = {
+      projects: {
+        listDirectory: vi.fn(async () => ({
+          entries: [{ path: "README.md", name: "README.md", kind: "file", parentPath: null }],
+          truncated: false,
+        })),
+        readFile: vi.fn(async ({ relativePath }: { relativePath: string }) => ({
+          relativePath,
+          contents: "needle in a haystack\n",
+          mtimeMs: 1,
+          sizeBytes: 21,
+          isBinary: false,
+          isTooLarge: false,
+        })),
+        searchFileContents: vi.fn(),
+        searchEntries: vi.fn(),
+        writeFile: vi.fn(),
+      },
+    } as unknown as NativeApi;
+
+    resetWorkbenchState();
+    useWorkspaceWorkbenchStore.getState().syncThreadRoot(THREAD_ID, "/repo");
+
+    const queryClient = new QueryClient();
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceWorkbench threadId={THREAD_ID} workspaceRoot="/repo" />
+      </QueryClientProvider>,
+      { container: host },
+    );
+
+    await screen.getByRole("button", { name: "README.md" }).click();
+    await expect.element(screen.getByTestId("workspace-editor")).toBeInTheDocument();
+
+    await screen.getByRole("button", { name: "Find in file" }).click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector(".cm-search")).toBeTruthy();
+    });
+
+    const findField = document.querySelector<HTMLInputElement>(".cm-search input[name='search']");
+    const replaceField = document.querySelector<HTMLInputElement>(
+      ".cm-search input[name='replace']",
+    );
+    const replaceButton = document.querySelector<HTMLButtonElement>(
+      ".cm-search button[name='replace']",
+    );
+    const replaceAllButton = document.querySelector<HTMLButtonElement>(
+      ".cm-search button[name='replaceAll']",
+    );
+
+    expect(findField).toBeTruthy();
+    expect(replaceField).toBeTruthy();
+    expect(replaceButton).toBeTruthy();
+    expect(replaceAllButton).toBeTruthy();
+
+    const findBounds = findField!.getBoundingClientRect();
+    const replaceBounds = replaceField!.getBoundingClientRect();
+    expect(replaceBounds.top).toBeGreaterThan(findBounds.bottom - 1);
+    expect(replaceButton!.disabled).toBe(true);
+    expect(replaceAllButton!.disabled).toBe(true);
+
+    await screen.getByRole("textbox", { name: "Replace" }).fill("updated");
+
+    await vi.waitFor(() => {
+      expect(replaceButton!.disabled).toBe(false);
+      expect(replaceAllButton!.disabled).toBe(false);
+    });
+
+    await screen.unmount();
+    host.remove();
+  });
+
+  it("searches across files and reveals the matched range in the editor", async () => {
+    const fileContents = Array.from({ length: 220 }, (_, index) =>
+      index === 179
+        ? `const ${" ".repeat(80)}needle = ${index + 1};`
+        : `const filler_${index + 1} = ${index + 1};`,
+    ).join("\n");
+    const searchFileContents = vi.fn(async ({ query }: { query: string }) => {
+      if (query !== "needle") {
+        return { files: [], truncated: false };
+      }
+      return {
+        files: [
+          {
+            relativePath: "src/index.ts",
+            matchCount: 1,
+            matches: [
+              {
+                relativePath: "src/index.ts",
+                lineNumber: 180,
+                startColumn: 87,
+                endColumn: 93,
+                lineText: `const ${" ".repeat(80)}needle = 180;`,
+                snippet: `const ${" ".repeat(80)}needle = 180;`,
+              },
+            ],
+          },
+        ],
+        truncated: false,
+      };
+    });
+
+    window.nativeApi = {
+      projects: {
+        listDirectory: vi.fn(async () => ({
+          entries: [{ path: "src", name: "src", kind: "directory", parentPath: null }],
+          truncated: false,
+        })),
+        readFile: vi.fn(async ({ relativePath }: { relativePath: string }) => ({
+          relativePath,
+          contents: fileContents,
+          mtimeMs: 1,
+          sizeBytes: fileContents.length,
+          isBinary: false,
+          isTooLarge: false,
+        })),
+        searchFileContents,
+        searchEntries: vi.fn(),
+        writeFile: vi.fn(),
+      },
+    } as unknown as NativeApi;
+
+    resetWorkbenchState();
+    useWorkspaceWorkbenchStore.getState().syncThreadRoot(THREAD_ID, "/repo");
+
+    const queryClient = new QueryClient();
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceWorkbench threadId={THREAD_ID} workspaceRoot="/repo" />
+      </QueryClientProvider>,
+      { container: host },
+    );
+
+    await screen.getByRole("button", { name: "Search" }).click();
+    await screen.getByLabelText("Search across files").fill("needle");
+
+    await vi.waitFor(() => {
+      expect(searchFileContents).toHaveBeenCalled();
+      expect(document.body.textContent ?? "").toContain("src/index.ts");
+    });
+
+    await screen.getByText(`const ${" ".repeat(80)}needle = 180;`).click();
+
+    const view = await waitForCodeMirrorView();
+    await vi.waitFor(() => {
+      const selection = view.state.selection.main;
+      expect(view.state.sliceDoc(selection.from, selection.to)).toBe("needle");
+      expect(view.scrollDOM.scrollTop).toBeGreaterThan(0);
+      expect(view.scrollDOM.scrollLeft).toBeGreaterThan(0);
     });
 
     await screen.unmount();

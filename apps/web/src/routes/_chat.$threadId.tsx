@@ -242,6 +242,7 @@ function ChatThreadRouteView() {
   const closeWorkspace = useCallback(() => {
     setWorkspaceOpen(false);
   }, [setWorkspaceOpen]);
+  const workspaceWorkbenchHydrated = useWorkspaceWorkbenchStore((state) => state.hasHydrated);
   const registerCodeSelectionPromptHandler = useCallback(
     (handler: ((selection: CodeSelection) => void) | null) => {
       addCodeSelectionToPromptRef.current = handler;
@@ -283,8 +284,18 @@ function ChatThreadRouteView() {
   }, [shouldUseDiffSheet]);
 
   useEffect(() => {
+    if (!workspaceWorkbenchHydrated || !bootstrapComplete || !routeThreadExists) {
+      return;
+    }
     syncThreadRoot(threadId, workspaceRoot);
-  }, [syncThreadRoot, threadId, workspaceRoot]);
+  }, [
+    bootstrapComplete,
+    routeThreadExists,
+    syncThreadRoot,
+    threadId,
+    workspaceRoot,
+    workspaceWorkbenchHydrated,
+  ]);
 
   useEffect(() => {
     if (!bootstrapComplete) {

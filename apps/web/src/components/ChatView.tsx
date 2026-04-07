@@ -582,6 +582,14 @@ function PersistentThreadTerminalDrawer({
   );
 }
 
+function isWorkspaceEditorFocused(): boolean {
+  const activeElement = document.activeElement;
+  return (
+    activeElement instanceof HTMLElement &&
+    activeElement.closest(".workspace-editor-codemirror") !== null
+  );
+}
+
 export default function ChatView({ threadId, registerCodeSelectionPromptHandler }: ChatViewProps) {
   const serverThread = useThreadById(threadId);
   const setStoreThreadError = useStore((store) => store.setError);
@@ -756,6 +764,8 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
   const workspaceOpen = useWorkspaceWorkbenchStore((state) => state.isWorkspaceOpen);
   const setWorkspaceOpen = useWorkspaceWorkbenchStore((state) => state.setWorkspaceOpen);
   const toggleWorkspaceOpen = useWorkspaceWorkbenchStore((state) => state.toggleWorkspaceOpen);
+  const focusWorkspaceSearchPane = useWorkspaceWorkbenchStore((state) => state.focusSearchPane);
+  const requestWorkspaceEditorFind = useWorkspaceWorkbenchStore((state) => state.requestEditorFind);
   const revealWorkspaceFile = useWorkspaceWorkbenchStore((state) => state.revealFile);
   const storeSetTerminalOpen = useTerminalStateStore((s) => s.setTerminalOpen);
   const storeSplitTerminal = useTerminalStateStore((s) => s.splitTerminal);
@@ -2684,6 +2694,25 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
         return;
       }
 
+      if (command === "workspace.findInFiles") {
+        if (!gitCwd) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setWorkspaceOpen(true);
+        focusWorkspaceSearchPane(activeThreadId);
+        return;
+      }
+
+      if (command === "editor.find") {
+        if (!isWorkspaceEditorFocused()) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        requestWorkspaceEditorFind(activeThreadId);
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -2701,7 +2730,11 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
     activeThreadId,
     closeTerminal,
     createNewTerminal,
+    focusWorkspaceSearchPane,
+    gitCwd,
     setTerminalOpen,
+    setWorkspaceOpen,
+    requestWorkspaceEditorFind,
     runProjectScript,
     splitTerminal,
     keybindings,
