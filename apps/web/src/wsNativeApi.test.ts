@@ -48,6 +48,7 @@ const rpcClientMock = {
   projects: {
     listDirectory: vi.fn(),
     readFile: vi.fn(),
+    searchFileContents: vi.fn(),
     searchEntries: vi.fn(),
     writeFile: vi.fn(),
   },
@@ -202,6 +203,38 @@ describe("wsNativeApi", () => {
     expect(rpcClientMock.projects.listDirectory).toHaveBeenCalledWith({
       cwd: "/repo",
       relativePath: "src",
+    });
+  });
+
+  it("forwards projects.searchFileContents requests", async () => {
+    rpcClientMock.projects.searchFileContents.mockResolvedValue({ files: [], truncated: false });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+    await expect(
+      api.projects.searchFileContents({
+        cwd: "/repo",
+        query: "needle",
+        caseSensitive: false,
+        wholeWord: false,
+        regexp: false,
+        includeGlobs: [],
+        excludeGlobs: [],
+        limit: 20,
+      }),
+    ).resolves.toEqual({
+      files: [],
+      truncated: false,
+    });
+    expect(rpcClientMock.projects.searchFileContents).toHaveBeenCalledWith({
+      cwd: "/repo",
+      query: "needle",
+      caseSensitive: false,
+      wholeWord: false,
+      regexp: false,
+      includeGlobs: [],
+      excludeGlobs: [],
+      limit: 20,
     });
   });
 
