@@ -2,6 +2,9 @@ import { Schema } from "effect";
 import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas";
 
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
+const PROJECT_SEARCH_FILE_CONTENTS_MAX_LIMIT = 200;
+const PROJECT_SEARCH_FILE_CONTENTS_MAX_GLOBS = 32;
+const PROJECT_SEARCH_FILE_CONTENTS_MAX_GLOB_LENGTH = 256;
 const PROJECT_LIST_DIRECTORY_MAX_PATH_LENGTH = 512;
 const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
@@ -27,6 +30,49 @@ export const ProjectSearchEntriesResult = Schema.Struct({
   truncated: Schema.Boolean,
 });
 export type ProjectSearchEntriesResult = typeof ProjectSearchEntriesResult.Type;
+
+const ProjectSearchGlob = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(PROJECT_SEARCH_FILE_CONTENTS_MAX_GLOB_LENGTH),
+);
+
+export const ProjectTextSearchInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  query: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  caseSensitive: Schema.Boolean,
+  wholeWord: Schema.Boolean,
+  regexp: Schema.Boolean,
+  includeGlobs: Schema.Array(ProjectSearchGlob).check(
+    Schema.isMaxLength(PROJECT_SEARCH_FILE_CONTENTS_MAX_GLOBS),
+  ),
+  excludeGlobs: Schema.Array(ProjectSearchGlob).check(
+    Schema.isMaxLength(PROJECT_SEARCH_FILE_CONTENTS_MAX_GLOBS),
+  ),
+  limit: PositiveInt.check(Schema.isLessThanOrEqualTo(PROJECT_SEARCH_FILE_CONTENTS_MAX_LIMIT)),
+});
+export type ProjectTextSearchInput = typeof ProjectTextSearchInput.Type;
+
+export const ProjectTextSearchMatch = Schema.Struct({
+  relativePath: TrimmedNonEmptyString,
+  lineNumber: PositiveInt,
+  startColumn: PositiveInt,
+  endColumn: PositiveInt,
+  lineText: Schema.String,
+  snippet: Schema.String,
+});
+export type ProjectTextSearchMatch = typeof ProjectTextSearchMatch.Type;
+
+export const ProjectTextSearchFile = Schema.Struct({
+  relativePath: TrimmedNonEmptyString,
+  matchCount: PositiveInt,
+  matches: Schema.Array(ProjectTextSearchMatch),
+});
+export type ProjectTextSearchFile = typeof ProjectTextSearchFile.Type;
+
+export const ProjectTextSearchResult = Schema.Struct({
+  files: Schema.Array(ProjectTextSearchFile),
+  truncated: Schema.Boolean,
+});
+export type ProjectTextSearchResult = typeof ProjectTextSearchResult.Type;
 
 export const ProjectListDirectoryInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
@@ -68,6 +114,14 @@ export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 
 export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSearchEntriesError>()(
   "ProjectSearchEntriesError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class ProjectTextSearchError extends Schema.TaggedErrorClass<ProjectTextSearchError>()(
+  "ProjectTextSearchError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),
