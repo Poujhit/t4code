@@ -19,13 +19,24 @@ function parseGlobInput(input: string): string[] {
     .filter((entry) => entry.length > 0);
 }
 
-function renderHighlightedSnippet(match: ProjectTextSearchMatch) {
+function searchMatchKey(relativePath: string, match: ProjectTextSearchMatch): string {
+  return `${relativePath}:${match.lineNumber}:${match.startColumn}:${match.endColumn}:${match.snippet}`;
+}
+
+function renderHighlightedSnippet(match: ProjectTextSearchMatch, active: boolean) {
   const start = Math.max(0, match.startColumn - 1);
   const end = Math.max(start, match.endColumn - 1);
   return (
     <>
       <span>{match.snippet.slice(0, start)}</span>
-      <mark className="rounded bg-primary/18 px-0.5 text-foreground">
+      <mark
+        className={cn(
+          "rounded px-0.5 font-medium",
+          active
+            ? "bg-primary text-primary-foreground shadow-[0_0_0_1px_color-mix(in_srgb,var(--primary)_80%,transparent)]"
+            : "bg-amber-300/30 text-amber-50",
+        )}
+      >
         {match.snippet.slice(start, end)}
       </mark>
       <span>{match.snippet.slice(end)}</span>
@@ -234,14 +245,19 @@ export function WorkspaceSearchPane(props: {
                     <div className="border-t border-border/70">
                       {file.matches.map((match) => (
                         <Button
-                          key={`${file.relativePath}:${match.lineNumber}:${match.startColumn}:${match.endColumn}:${match.snippet}`}
+                          key={searchMatchKey(file.relativePath, match)}
                           variant="ghost"
                           size="sm"
                           className={cn(
                             "flex h-auto w-full items-start justify-start rounded-none px-2 py-2 text-left",
                             "hover:bg-accent/50",
+                            searchState.activeMatchKey ===
+                              searchMatchKey(file.relativePath, match) && "bg-accent/65",
                           )}
                           onClick={() => {
+                            updateSearchState(props.threadId, {
+                              activeMatchKey: searchMatchKey(file.relativePath, match),
+                            });
                             setPendingRevealTarget(props.threadId, {
                               path: file.relativePath,
                               lineNumber: match.lineNumber,
@@ -254,8 +270,20 @@ export function WorkspaceSearchPane(props: {
                           <span className="mt-0.5 shrink-0 font-mono text-[11px] text-muted-foreground">
                             {match.lineNumber}
                           </span>
-                          <span className="min-w-0 flex-1 overflow-hidden font-mono text-[12px] leading-5 text-foreground/90">
-                            {renderHighlightedSnippet(match)}
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 overflow-hidden font-mono text-[12px] leading-5",
+                              searchState.activeMatchKey ===
+                                searchMatchKey(file.relativePath, match)
+                                ? "text-foreground"
+                                : "text-foreground/90",
+                            )}
+                          >
+                            {renderHighlightedSnippet(
+                              match,
+                              searchState.activeMatchKey ===
+                                searchMatchKey(file.relativePath, match),
+                            )}
                           </span>
                         </Button>
                       ))}

@@ -7,6 +7,8 @@ export function WorkspaceEditorHeader(props: {
   relativePath: string;
   isDirty: boolean;
   readOnlyLabel?: string | null;
+  canAcceptAllAiChanges?: boolean;
+  onAcceptAllAiChanges?: (() => void) | null;
   canOpenFind?: boolean;
   onOpenFind?: (() => void) | null;
 }) {
@@ -31,18 +33,30 @@ export function WorkspaceEditorHeader(props: {
             {props.relativePath}
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="shrink-0"
-          disabled={!props.canOpenFind}
-          onClick={() => props.onOpenFind?.()}
-          aria-label="Find in file"
-          title="Find in file"
-        >
-          <SearchIcon className="size-4" />
-          Find
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {props.canAcceptAllAiChanges ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => props.onAcceptAllAiChanges?.()}
+              aria-label="Accept all AI changes"
+            >
+              Accept all AI changes
+            </Button>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0"
+            disabled={!props.canOpenFind}
+            onClick={() => props.onOpenFind?.()}
+            aria-label="Find in file"
+            title="Find in file"
+          >
+            <SearchIcon className="size-4" />
+            Find
+          </Button>
+        </div>
       </div>
     </div>
   );

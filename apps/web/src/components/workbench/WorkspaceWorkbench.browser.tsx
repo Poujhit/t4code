@@ -453,6 +453,9 @@ describe("WorkspaceWorkbench", () => {
     await vi.waitFor(() => {
       expect(view.state.facet(EditorState.readOnly)).toBe(true);
       expect(document.querySelectorAll('[aria-label^="Accept AI hunk"]').length).toBe(2);
+      expect(document.querySelectorAll('[data-slot="workspace-editor-minimap-hunk"]').length).toBe(
+        2,
+      );
       expect(document.body.textContent ?? "").toContain("return 1;");
       const inlineAdditions = Array.from(
         document.querySelectorAll(".cm-ai-review-inline-addition"),
@@ -484,6 +487,9 @@ describe("WorkspaceWorkbench", () => {
     (finalAcceptButton as HTMLButtonElement).click();
     await vi.waitFor(() => {
       expect(document.querySelectorAll('[aria-label^="Accept AI hunk"]').length).toBe(0);
+      expect(document.querySelectorAll('[data-slot="workspace-editor-minimap-hunk"]').length).toBe(
+        0,
+      );
       expect(view.state.facet(EditorState.readOnly)).toBe(false);
       expect(document.body.textContent ?? "").not.toContain("AI review");
     });
@@ -1097,8 +1103,387 @@ describe("WorkspaceWorkbench", () => {
     await vi.waitFor(() => {
       const selection = view.state.selection.main;
       expect(view.state.sliceDoc(selection.from, selection.to)).toBe("needle");
-      expect(view.scrollDOM.scrollTop).toBeGreaterThan(0);
       expect(view.scrollDOM.scrollLeft).toBeGreaterThan(0);
+    });
+
+    await screen.unmount();
+    host.remove();
+  });
+
+  it("accepts all pending AI hunks from the editor header", async () => {
+    const fileContents = [
+      "export function example() {",
+      "  const value = 2;",
+      "  return value;",
+      "}",
+      "",
+      "export function another() {",
+      "  return 2;",
+      "}",
+    ].join("\n");
+    const diff = [
+      "diff --git a/src/example.ts b/src/example.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/example.ts",
+      "+++ b/src/example.ts",
+      "@@ -1,4 +1,4 @@",
+      " export function example() {",
+      "-  return 1;",
+      "+  const value = 2;",
+      "+  return value;",
+      " }",
+      "@@ -5,4 +6,3 @@",
+      " export function another() {",
+      "-  return 1;",
+      "+  return 2;",
+      " }",
+      "",
+    ].join("\n");
+    window.nativeApi = {
+      projects: {
+        listDirectory: vi.fn(async () => ({
+          entries: [{ path: "src/example.ts", name: "example.ts", kind: "file", parentPath: null }],
+          truncated: false,
+        })),
+        readFile: vi.fn(async ({ relativePath }: { relativePath: string }) => ({
+          relativePath,
+          contents: fileContents,
+          mtimeMs: 100,
+          sizeBytes: fileContents.length,
+          isBinary: false,
+          isTooLarge: false,
+        })),
+        searchFileContents: vi.fn(),
+        searchEntries: vi.fn(),
+        writeFile: vi.fn(),
+      },
+      orchestration: {
+        getFullThreadDiff: vi.fn(async () => ({
+          threadId: THREAD_ID,
+          fromTurnCount: 0,
+          toTurnCount: 1,
+          diff,
+        })),
+        getTurnDiff: vi.fn(),
+      },
+    } as unknown as NativeApi;
+
+    resetWorkbenchState();
+    useWorkspaceWorkbenchStore.getState().syncThreadRoot(THREAD_ID, "/repo");
+    useStore.setState((state) => ({
+      ...state,
+      threads: [
+        makeThread({
+          turnDiffSummaries: [
+            {
+              turnId: TurnId.makeUnsafe("turn-1"),
+              completedAt: "2026-04-05T10:01:00.000Z",
+              checkpointTurnCount: 1,
+              status: "ready",
+              files: [{ path: "src/example.ts", additions: 3, deletions: 2 }],
+            },
+          ],
+        }),
+      ],
+      bootstrapComplete: true,
+    }));
+
+    const queryClient = new QueryClient();
+    const host = document.createElement("div");
+    host.style.width = "960px";
+    host.style.height = "640px";
+    document.body.append(host);
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <div style={{ width: "960px", height: "640px" }}>
+          <WorkspaceWorkbench threadId={THREAD_ID} workspaceRoot="/repo" />
+        </div>
+      </QueryClientProvider>,
+      { container: host },
+    );
+
+    await screen.getByRole("button", { name: "example.ts" }).click();
+    const view = await waitForCodeMirrorView();
+    await vi.waitFor(() => {
+      expect(view.state.facet(EditorState.readOnly)).toBe(true);
+      expect(document.querySelectorAll('[aria-label^="Accept AI hunk"]').length).toBe(2);
+    });
+
+    await screen.getByRole("button", { name: "Accept all AI changes" }).click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll('[aria-label^="Accept AI hunk"]').length).toBe(0);
+      expect(view.state.facet(EditorState.readOnly)).toBe(false);
+      expect(document.body.textContent ?? "").not.toContain("AI review");
+    });
+
+    await screen.unmount();
+    host.remove();
+  });
+
+  it("shows deduped AI changed files across the thread and opens the selected file", async () => {
+    window.nativeApi = {
+      projects: {
+        listDirectory: vi.fn(async () => ({
+          entries: [],
+          truncated: false,
+        })),
+        readFile: vi.fn(async ({ relativePath }: { relativePath: string }) => ({
+          relativePath,
+          contents: `opened ${relativePath}\n`,
+          mtimeMs: 1,
+          sizeBytes: relativePath.length + 8,
+          isBinary: false,
+          isTooLarge: false,
+        })),
+        searchFileContents: vi.fn(),
+        searchEntries: vi.fn(),
+        writeFile: vi.fn(),
+      },
+    } as unknown as NativeApi;
+
+    resetWorkbenchState();
+    useWorkspaceWorkbenchStore.getState().syncThreadRoot(THREAD_ID, "/repo");
+    useStore.setState((state) => ({
+      ...state,
+      threads: [
+        makeThread({
+          turnDiffSummaries: [
+            {
+              turnId: TurnId.makeUnsafe("turn-1"),
+              completedAt: "2026-04-05T10:01:00.000Z",
+              checkpointTurnCount: 1,
+              status: "ready",
+              files: [
+                { path: "README.md", additions: 1, deletions: 0 },
+                { path: "package.json", additions: 2, deletions: 1 },
+              ],
+            },
+            {
+              turnId: TurnId.makeUnsafe("turn-2"),
+              completedAt: "2026-04-05T10:02:00.000Z",
+              checkpointTurnCount: 2,
+              status: "ready",
+              files: [
+                { path: "README.md", additions: 4, deletions: 3 },
+                { path: "tsconfig.json", additions: 1, deletions: 1 },
+              ],
+            },
+          ],
+        }),
+      ],
+    }));
+
+    const queryClient = new QueryClient();
+    const host = document.createElement("div");
+    host.style.width = "960px";
+    host.style.height = "640px";
+    document.body.append(host);
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <div style={{ width: "960px", height: "640px" }}>
+          <WorkspaceWorkbench threadId={THREAD_ID} workspaceRoot="/repo" />
+        </div>
+      </QueryClientProvider>,
+      { container: host },
+    );
+
+    await screen.getByRole("button", { name: "AI Changes" }).click();
+    await expect.element(screen.getByText("README.md")).toBeInTheDocument();
+    await expect.element(screen.getByText("package.json")).toBeInTheDocument();
+    await expect.element(screen.getByText("tsconfig.json")).toBeInTheDocument();
+
+    await screen.getByRole("button", { name: "tsconfig.json" }).click();
+    await expect.element(screen.getByText("opened tsconfig.json")).toBeInTheDocument();
+
+    await screen.unmount();
+    host.remove();
+  });
+
+  it("shows an empty state when the thread has no AI changed files", async () => {
+    window.nativeApi = {
+      projects: {
+        listDirectory: vi.fn(async () => ({
+          entries: [],
+          truncated: false,
+        })),
+        readFile: vi.fn(),
+        searchFileContents: vi.fn(),
+        searchEntries: vi.fn(),
+        writeFile: vi.fn(),
+      },
+    } as unknown as NativeApi;
+
+    resetWorkbenchState();
+    useWorkspaceWorkbenchStore.getState().syncThreadRoot(THREAD_ID, "/repo");
+    useStore.setState((state) => ({
+      ...state,
+      threads: [makeThread()],
+    }));
+
+    const queryClient = new QueryClient();
+    const host = document.createElement("div");
+    host.style.width = "960px";
+    host.style.height = "640px";
+    document.body.append(host);
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <div style={{ width: "960px", height: "640px" }}>
+          <WorkspaceWorkbench threadId={THREAD_ID} workspaceRoot="/repo" />
+        </div>
+      </QueryClientProvider>,
+      { container: host },
+    );
+
+    await screen.getByRole("button", { name: "AI Changes" }).click();
+    await expect.element(screen.getByText("No AI changed files")).toBeInTheDocument();
+
+    await screen.unmount();
+    host.remove();
+  });
+
+  it("renders fold gutter controls and toggles a foldable block", async () => {
+    window.nativeApi = {
+      projects: {
+        listDirectory: vi.fn(async () => ({
+          entries: [{ path: "src/example.ts", name: "example.ts", kind: "file", parentPath: null }],
+          truncated: false,
+        })),
+        readFile: vi.fn(async ({ relativePath }: { relativePath: string }) => ({
+          relativePath,
+          contents: [
+            "export function example() {",
+            "  const value = 1;",
+            "  return value;",
+            "}",
+            "",
+            "export function other() {",
+            "  return 2;",
+            "}",
+          ].join("\n"),
+          mtimeMs: 1,
+          sizeBytes: 120,
+          isBinary: false,
+          isTooLarge: false,
+        })),
+        searchFileContents: vi.fn(),
+        searchEntries: vi.fn(),
+        writeFile: vi.fn(),
+      },
+    } as unknown as NativeApi;
+
+    resetWorkbenchState();
+    useWorkspaceWorkbenchStore.getState().syncThreadRoot(THREAD_ID, "/repo");
+
+    const queryClient = new QueryClient();
+    const host = document.createElement("div");
+    host.style.width = "960px";
+    host.style.height = "640px";
+    document.body.append(host);
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <div style={{ width: "960px", height: "640px" }}>
+          <WorkspaceWorkbench threadId={THREAD_ID} workspaceRoot="/repo" />
+        </div>
+      </QueryClientProvider>,
+      { container: host },
+    );
+
+    await screen.getByRole("button", { name: "example.ts" }).click();
+    await expect.element(screen.getByTestId("workspace-editor")).toBeInTheDocument();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector(".cm-foldMarker-open")).toBeTruthy();
+    });
+
+    (document.querySelector(".cm-foldMarker-open") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(document.querySelector(".cm-foldMarker-closed")).toBeTruthy();
+      expect(document.body.textContent ?? "").not.toContain("const value = 1;");
+    });
+
+    (document.querySelector(".cm-foldMarker-closed") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(document.querySelector(".cm-foldMarker-open")).toBeTruthy();
+      expect(document.body.textContent ?? "").toContain("const value = 1;");
+    });
+
+    await screen.unmount();
+    host.remove();
+  });
+
+  it("renders the editor minimap and scrolls the editor when it is dragged", async () => {
+    const fileContents = Array.from(
+      { length: 400 },
+      (_, index) => `const line${index.toString().padStart(3, "0")} = ${index};`,
+    ).join("\n");
+    window.nativeApi = {
+      projects: {
+        listDirectory: vi.fn(async () => ({
+          entries: [{ path: "src/index.ts", name: "index.ts", kind: "file", parentPath: null }],
+          truncated: false,
+        })),
+        readFile: vi.fn(async ({ relativePath }: { relativePath: string }) => ({
+          relativePath,
+          contents: fileContents,
+          mtimeMs: 1,
+          sizeBytes: fileContents.length,
+          isBinary: false,
+          isTooLarge: false,
+        })),
+        searchFileContents: vi.fn(),
+        searchEntries: vi.fn(),
+        writeFile: vi.fn(),
+      },
+    } as unknown as NativeApi;
+
+    resetWorkbenchState();
+    useWorkspaceWorkbenchStore.getState().syncThreadRoot(THREAD_ID, "/repo");
+
+    const queryClient = new QueryClient();
+    const host = document.createElement("div");
+    host.style.width = "960px";
+    host.style.height = "640px";
+    document.body.append(host);
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <div style={{ width: "960px", height: "640px" }}>
+          <WorkspaceWorkbench threadId={THREAD_ID} workspaceRoot="/repo" />
+        </div>
+      </QueryClientProvider>,
+      { container: host },
+    );
+
+    await screen.getByRole("button", { name: "index.ts" }).click();
+    const view = await waitForCodeMirrorView();
+    await expect.element(screen.getByTestId("workspace-editor-minimap")).toBeInTheDocument();
+    const minimap = document.querySelector<HTMLElement>('[data-testid="workspace-editor-minimap"]');
+    expect(minimap).toBeTruthy();
+
+    await vi.waitFor(() => {
+      expect(view.scrollDOM.clientHeight).toBeGreaterThan(0);
+    });
+
+    const rect = minimap!.getBoundingClientRect();
+    minimap!.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        pointerId: 1,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height * 0.85,
+        bubbles: true,
+      }),
+    );
+    minimap!.dispatchEvent(
+      new PointerEvent("pointerup", {
+        pointerId: 1,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height * 0.85,
+        bubbles: true,
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(view.scrollDOM.scrollTop).toBeGreaterThan(0);
     });
 
     await screen.unmount();

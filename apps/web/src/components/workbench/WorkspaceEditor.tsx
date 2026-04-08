@@ -20,7 +20,13 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { bracketMatching, indentOnInput } from "@codemirror/language";
+import {
+  bracketMatching,
+  codeFolding,
+  foldGutter,
+  foldKeymap,
+  indentOnInput,
+} from "@codemirror/language";
 import { openSearchPanel, search } from "@codemirror/search";
 import { css } from "@codemirror/lang-css";
 import { go } from "@codemirror/lang-go";
@@ -59,6 +65,7 @@ import {
 } from "~/workspaceWorkbenchStore";
 import { WorkspaceEditorHeader } from "./WorkspaceEditorHeader";
 import { WorkspaceFileFallback } from "./WorkspaceFileFallback";
+import { WorkspaceEditorMinimap } from "./WorkspaceEditorMinimap";
 import { WorkspaceOpenFilesBar } from "./WorkspaceOpenFilesBar";
 
 function classifyWorkspaceFileError(error: unknown): {
@@ -90,6 +97,24 @@ function languageExtensionForPath(relativePath: string): Extension | null {
   if (language === "py") return python();
   if (language === "go") return go();
   return null;
+}
+
+function foldExtensionsForPath(relativePath: string): Extension[] {
+  if (!languageExtensionForPath(relativePath)) {
+    return [];
+  }
+
+  return [
+    codeFolding(),
+    foldGutter({
+      markerDOM(open) {
+        const marker = document.createElement("span");
+        marker.className = `cm-foldMarker ${open ? "cm-foldMarker-open" : "cm-foldMarker-closed"}`;
+        marker.textContent = open ? "⌄" : "›";
+        return marker;
+      },
+    }),
+  ];
 }
 
 function readPrimarySelectionSnapshot(
@@ -128,10 +153,8 @@ function revealWorkspaceMatch(view: EditorView, target: WorkspaceMatchRevealTarg
     effects: EditorView.scrollIntoView(from, { x: "center", y: "center" }),
   });
 
-  const targetTop = Math.max(
-    0,
-    (target.lineNumber - 1) * view.defaultLineHeight - scroller.clientHeight / 2,
-  );
+  const lineTop = view.lineBlockAt(from).top;
+  const targetTop = Math.max(0, lineTop - scroller.clientHeight / 2);
   const startCoords = view.coordsAtPos(from);
   const endCoords = view.coordsAtPos(rangeEnd);
   if (!startCoords) {
@@ -324,20 +347,20 @@ function editorTheme(_resolvedTheme: "light" | "dark"): Extension {
         overflowX: "auto",
         overflowY: "auto",
         overscrollBehavior: "contain",
-        scrollbarWidth: "thin",
+        scrollbarWidth: "auto",
         scrollbarColor: "rgba(255, 255, 255, 0.1) transparent",
         backgroundColor: "var(--background)",
       },
       "& .cm-scroller::-webkit-scrollbar": {
-        width: "6px",
-        height: "6px",
+        width: "10px",
+        height: "10px",
       },
       "& .cm-scroller::-webkit-scrollbar-track": {
         background: "transparent",
       },
       "& .cm-scroller::-webkit-scrollbar-thumb": {
         background: "rgba(255, 255, 255, 0.1)",
-        borderRadius: "3px",
+        borderRadius: "999px",
       },
       "& .cm-scroller::-webkit-scrollbar-thumb:hover": {
         background: "rgba(255, 255, 255, 0.18)",
@@ -359,6 +382,12 @@ function editorTheme(_resolvedTheme: "light" | "dark"): Extension {
         backgroundColor: gutterBackground,
         color: "var(--muted-foreground)",
         borderRight: "1px solid color-mix(in srgb, var(--border) 78%, transparent)",
+      },
+      "& .cm-foldGutter": {
+        width: "1.25rem",
+      },
+      "& .cm-foldGutter .cm-gutterElement": {
+        padding: "0 2px 0 4px",
       },
       "& .cm-lineNumbers": {
         backgroundColor: gutterBackground,
@@ -383,6 +412,28 @@ function editorTheme(_resolvedTheme: "light" | "dark"): Extension {
       },
       "& .cm-line": {
         paddingLeft: "2px",
+      },
+      "& .cm-foldMarker": {
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "14px",
+        height: "14px",
+        borderRadius: "3px",
+        color: "var(--muted-foreground)",
+        fontSize: "11px",
+        lineHeight: "1",
+      },
+      "& .cm-gutterElement:hover .cm-foldMarker": {
+        backgroundColor: "color-mix(in srgb, var(--accent) 80%, transparent)",
+        color: "var(--foreground)",
+      },
+      "& .cm-foldPlaceholder": {
+        border: "1px solid color-mix(in srgb, var(--border) 78%, transparent)",
+        borderRadius: "4px",
+        backgroundColor: "color-mix(in srgb, var(--card) 88%, var(--background))",
+        color: "var(--muted-foreground)",
+        padding: "0 6px",
       },
       "& .cm-ai-review-line": {
         backgroundColor: "color-mix(in srgb, var(--background) 80%, var(--primary) 20%)",
@@ -474,6 +525,17 @@ function editorTheme(_resolvedTheme: "light" | "dark"): Extension {
       "& .cm-panel": {
         backgroundColor: "color-mix(in srgb, var(--background) 94%, var(--card))",
         color: "var(--foreground)",
+      },
+      "& .cm-searchMatch": {
+        borderRadius: "3px",
+        backgroundColor: "color-mix(in srgb, #f59e0b 28%, transparent)",
+        boxShadow: "inset 0 0 0 1px color-mix(in srgb, #f59e0b 46%, transparent)",
+      },
+      "& .cm-searchMatch.cm-searchMatch-selected": {
+        backgroundColor: "color-mix(in srgb, var(--primary) 78%, var(--color-white) 8%)",
+        color: "var(--primary-foreground)",
+        boxShadow:
+          "inset 0 0 0 1px color-mix(in srgb, var(--primary) 94%, var(--color-white) 12%), 0 0 0 1px color-mix(in srgb, var(--primary) 34%, transparent)",
       },
       "& .cm-search": {
         position: "relative",
@@ -878,6 +940,7 @@ function createBaseEditorExtensions(params: {
         },
       },
       indentWithTab,
+      ...foldKeymap,
       ...defaultKeymap,
       ...historyKeymap,
     ]),
@@ -933,6 +996,8 @@ function CodeMirrorEditor(props: {
   const viewRef = useRef<EditorView | null>(null);
   const initialRelativePathRef = useRef(props.relativePath);
   const initialValueRef = useRef(props.value);
+  const [minimapView, setMinimapView] = useState<EditorView | null>(null);
+  const foldCompartmentRef = useRef(new Compartment());
   const languageCompartmentRef = useRef(new Compartment());
   const themeCompartmentRef = useRef(new Compartment());
   const behaviorCompartmentRef = useRef(new Compartment());
@@ -954,6 +1019,7 @@ function CodeMirrorEditor(props: {
     const state = EditorState.create({
       doc: initialValueRef.current,
       extensions: [
+        foldCompartmentRef.current.of(foldExtensionsForPath(initialRelativePathRef.current)),
         lineNumbers(),
         highlightActiveLineGutter(),
         languageCompartmentRef.current.of(
@@ -977,10 +1043,12 @@ function CodeMirrorEditor(props: {
       parent: containerRef.current,
     });
     viewRef.current = view;
+    setMinimapView(view);
     onViewReadyEvent(view);
     return () => {
       view.destroy();
       viewRef.current = null;
+      setMinimapView(null);
       onViewReadyEvent(null);
     };
   }, []);
@@ -1010,6 +1078,7 @@ function CodeMirrorEditor(props: {
           }
         : null),
       effects: [
+        foldCompartmentRef.current.reconfigure(foldExtensionsForPath(props.relativePath)),
         languageCompartmentRef.current.reconfigure(
           languageExtensionForPath(props.relativePath)
             ? [languageExtensionForPath(props.relativePath)!]
@@ -1042,10 +1111,16 @@ function CodeMirrorEditor(props: {
   }, [props.searchRequestKey]);
 
   return (
-    <div className="workspace-editor-codemirror flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+    <div className="workspace-editor-codemirror flex h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <div
         ref={containerRef}
         className="h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      />
+      <WorkspaceEditorMinimap
+        value={props.value}
+        resolvedTheme={props.resolvedTheme}
+        view={minimapView}
+        reviewHunks={props.reviewHunks ?? []}
       />
     </div>
   );
@@ -1098,6 +1173,9 @@ export function WorkspaceEditor(props: {
   );
   const setAiReviewState = useWorkspaceWorkbenchStore((state) => state.setAiReviewState);
   const acceptAiReviewHunk = useWorkspaceWorkbenchStore((state) => state.acceptAiReviewHunk);
+  const acceptAllAiReviewHunks = useWorkspaceWorkbenchStore(
+    (state) => state.acceptAllAiReviewHunks,
+  );
   const invalidateAiReviewState = useWorkspaceWorkbenchStore(
     (state) => state.invalidateAiReviewState,
   );
@@ -1489,6 +1567,8 @@ export function WorkspaceEditor(props: {
         relativePath={props.relativePath}
         isDirty={isDirty}
         readOnlyLabel={readOnlyLabel}
+        canAcceptAllAiChanges={isAiReviewActive}
+        onAcceptAllAiChanges={() => acceptAllAiReviewHunks(props.threadId, props.relativePath)}
         canOpenFind={canOpenFind}
         onOpenFind={() => requestEditorFind(props.threadId)}
       />
