@@ -124,6 +124,48 @@ describe("workspaceWorkbenchStore", () => {
     expect("pendingRevealTargetByThreadId" in persistedState).toBe(false);
   });
 
+  it("accepts all active AI review hunks for the current file", () => {
+    const store = useWorkspaceWorkbenchStore.getState();
+    const relativePath = "src/index.ts";
+    const key = workspaceFileStateKey(THREAD_ID, relativePath);
+    const acceptanceKey = workspaceAiReviewKey(THREAD_ID, relativePath, "turn-ai-review" as never);
+
+    store.setAiReviewState(THREAD_ID, relativePath, {
+      turnId: "turn-ai-review" as never,
+      snapshotContents: "export const value = 2;\nconsole.info(value);\n",
+      hunks: [
+        {
+          id: "hunk-1",
+          startLine: 1,
+          endLine: 1,
+          deletedLines: [],
+          addedLines: [{ text: "export const value = 2;", emphasizedRanges: [] }],
+        },
+        {
+          id: "hunk-2",
+          startLine: 2,
+          endLine: 2,
+          deletedLines: [],
+          addedLines: [{ text: "console.info(value);", emphasizedRanges: [] }],
+        },
+      ],
+      acceptedHunkIds: ["hunk-1"],
+      status: "active",
+    });
+
+    store.acceptAllAiReviewHunks(THREAD_ID, relativePath);
+
+    expect(useWorkspaceWorkbenchStore.getState().aiReviewStateByThreadIdAndPath[key]).toMatchObject(
+      {
+        acceptedHunkIds: ["hunk-1", "hunk-2"],
+        status: "completed",
+      },
+    );
+    expect(useWorkspaceWorkbenchStore.getState().acceptedAiReviewHunksByKey[acceptanceKey]).toEqual(
+      ["hunk-1", "hunk-2"],
+    );
+  });
+
   it("rehydrates AI review state after app reopen", async () => {
     const relativePath = "src/index.ts";
     const key = workspaceFileStateKey(THREAD_ID, relativePath);

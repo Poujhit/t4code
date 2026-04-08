@@ -9,7 +9,7 @@ interface WorkspaceThreadState {
   expandedDirectoryPaths: string[];
 }
 
-export type WorkspacePaneMode = "files" | "search";
+export type WorkspacePaneMode = "files" | "search" | "ai-changed-files";
 
 export interface WorkspaceSearchState {
   query: string;
@@ -19,6 +19,7 @@ export interface WorkspaceSearchState {
   includeGlobInput: string;
   excludeGlobInput: string;
   collapsedFilePaths: string[];
+  activeMatchKey: string | null;
   focusRequestKey: number;
 }
 
@@ -100,6 +101,7 @@ interface WorkspaceWorkbenchStoreState {
   setFileError: (threadId: ThreadId, path: string, error: WorkspaceFileErrorState | null) => void;
   setAiReviewState: (threadId: ThreadId, path: string, input: WorkspaceAiReviewState) => void;
   acceptAiReviewHunk: (threadId: ThreadId, path: string, hunkId: string) => void;
+  acceptAllAiReviewHunks: (threadId: ThreadId, path: string) => void;
   invalidateAiReviewState: (threadId: ThreadId, path: string) => void;
   clearAiReviewState: (threadId: ThreadId, path: string) => void;
   clearThreadState: (threadId: ThreadId) => void;
@@ -125,6 +127,7 @@ const DEFAULT_SEARCH_STATE: WorkspaceSearchState = Object.freeze({
   includeGlobInput: "",
   excludeGlobInput: "",
   collapsedFilePaths: [],
+  activeMatchKey: null,
   focusRequestKey: 0,
 });
 
@@ -225,6 +228,19 @@ function areAiReviewStatesEqual(
     areStringArraysEqual(left.acceptedHunkIds, right.acceptedHunkIds) &&
     left.hunks === right.hunks
   );
+}
+
+function applyAcceptedAiReviewHunkIds(
+  current: WorkspaceAiReviewState,
+  acceptedHunkIds: string[],
+): WorkspaceAiReviewState {
+  const allAccepted =
+    current.hunks.length > 0 && current.hunks.every((hunk) => acceptedHunkIds.includes(hunk.id));
+  return {
+    ...current,
+    acceptedHunkIds,
+    status: allAccepted ? "completed" : "active",
+  };
 }
 
 export function selectWorkspaceThreadState(
@@ -812,18 +828,35 @@ export const useWorkspaceWorkbenchStore = create<WorkspaceWorkbenchStoreState>()
             return state;
           }
           const acceptedHunkIds = [...current.acceptedHunkIds, hunkId];
-          const allAccepted = current.hunks.every((hunk) => acceptedHunkIds.includes(hunk.id));
           const acceptanceKey = workspaceAiReviewKey(threadId, path, current.turnId);
           return {
             aiReviewStateByThreadIdAndPath: setThreadScopedValue(
               state.aiReviewStateByThreadIdAndPath,
               threadId,
               path,
-              {
-                ...current,
-                acceptedHunkIds,
-                status: allAccepted ? "completed" : "active",
-              },
+              applyAcceptedAiReviewHunkIds(current, acceptedHunkIds),
+            ),
+            acceptedAiReviewHunksByKey: {
+              ...state.acceptedAiReviewHunksByKey,
+              [acceptanceKey]: acceptedHunkIds,
+            },
+          };
+        }),
+      acceptAllAiReviewHunks: (threadId, path) =>
+        set((state) => {
+          const key = workspaceFileStateKey(threadId, path);
+          const current = state.aiReviewStateByThreadIdAndPath[key];
+          if (!current || current.status !== "active" || current.hunks.length === 0) {
+            return state;
+          }
+          const acceptedHunkIds = current.hunks.map((hunk) => hunk.id);
+          const acceptanceKey = workspaceAiReviewKey(threadId, path, current.turnId);
+          return {
+            aiReviewStateByThreadIdAndPath: setThreadScopedValue(
+              state.aiReviewStateByThreadIdAndPath,
+              threadId,
+              path,
+              applyAcceptedAiReviewHunkIds(current, acceptedHunkIds),
             ),
             acceptedAiReviewHunksByKey: {
               ...state.acceptedAiReviewHunksByKey,
