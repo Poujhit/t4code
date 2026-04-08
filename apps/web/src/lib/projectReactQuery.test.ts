@@ -7,6 +7,7 @@ import {
   projectMutationKeys,
   projectQueryKeys,
   projectReadFileQueryOptions,
+  projectSearchFileContentsQueryOptions,
   projectSearchEntriesQueryOptions,
   projectWriteFileMutationOptions,
 } from "./projectReactQuery";
@@ -14,6 +15,7 @@ import {
 function mockNativeApi(input: {
   listDirectory?: ReturnType<typeof vi.fn>;
   readFile?: ReturnType<typeof vi.fn>;
+  searchFileContents?: ReturnType<typeof vi.fn>;
   searchEntries?: ReturnType<typeof vi.fn>;
   writeFile?: ReturnType<typeof vi.fn>;
 }) {
@@ -21,6 +23,7 @@ function mockNativeApi(input: {
     projects: {
       listDirectory: input.listDirectory ?? vi.fn(),
       readFile: input.readFile ?? vi.fn(),
+      searchFileContents: input.searchFileContents ?? vi.fn(),
       searchEntries: input.searchEntries ?? vi.fn(),
       writeFile: input.writeFile ?? vi.fn(),
     },
@@ -94,6 +97,37 @@ describe("projectSearchEntriesQueryOptions", () => {
       cwd: "/repo",
       query: "comp",
       limit: 80,
+    });
+  });
+});
+
+describe("projectSearchFileContentsQueryOptions", () => {
+  it("forwards content search input to the native API", async () => {
+    const searchFileContents = vi.fn().mockResolvedValue({ files: [], truncated: false });
+    mockNativeApi({ searchFileContents });
+
+    const queryClient = new QueryClient();
+    await queryClient.fetchQuery(
+      projectSearchFileContentsQueryOptions({
+        cwd: "/repo",
+        query: "needle",
+        caseSensitive: false,
+        wholeWord: true,
+        regexp: false,
+        includeGlobs: ["src/**/*.ts"],
+        excludeGlobs: ["dist/**"],
+      }),
+    );
+
+    expect(searchFileContents).toHaveBeenCalledWith({
+      cwd: "/repo",
+      query: "needle",
+      caseSensitive: false,
+      wholeWord: true,
+      regexp: false,
+      includeGlobs: ["src/**/*.ts"],
+      excludeGlobs: ["dist/**"],
+      limit: 200,
     });
   });
 });

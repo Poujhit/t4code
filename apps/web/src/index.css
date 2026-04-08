@@ -203,7 +203,7 @@ input {
 }
 
 .workspace-editor-codemirror .cm-scroller {
-  scrollbar-width: thin;
+  scrollbar-width: auto;
   scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
 
@@ -212,8 +212,8 @@ input {
 }
 
 .workspace-editor-codemirror .cm-scroller::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 .workspace-editor-codemirror .cm-scroller::-webkit-scrollbar-track {
@@ -250,7 +250,7 @@ input {
 
 .workspace-editor-codemirror .cm-scroller::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.15);
-  border-radius: 3px;
+  border-radius: 999px;
 }
 
 .workspace-editor-codemirror .cm-scroller::-webkit-scrollbar-thumb:hover {

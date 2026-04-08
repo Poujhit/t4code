@@ -3,9 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   clampWorkspacePaneWidth,
+  mergeWorkspaceWorkbenchPersistedState,
   partializeWorkspaceWorkbenchState,
+  selectWorkspaceSearchState,
   selectWorkspaceThreadState,
   useWorkspaceWorkbenchStore,
+  workspaceAiReviewKey,
   workspaceFileStateKey,
   WORKSPACE_INLINE_DEFAULT_WIDTH,
   WORKSPACE_INLINE_MAX_WIDTH,
@@ -24,6 +27,8 @@ describe("workspaceWorkbenchStore", () => {
       isWorkspaceOpen: false,
       workspacePaneWidth: WORKSPACE_INLINE_DEFAULT_WIDTH,
       threadStateByThreadId: {},
+      paneModeByThreadId: {},
+      searchStateByThreadId: {},
       openFilePathsByThreadId: {},
       activeFilePathByThreadId: {},
       draftContentByThreadIdAndPath: {},
@@ -31,11 +36,15 @@ describe("workspaceWorkbenchStore", () => {
       isDirtyByThreadIdAndPath: {},
       lastLoadErrorByThreadIdAndPath: {},
       aiReviewStateByThreadIdAndPath: {},
+      acceptedAiReviewHunksByKey: {},
+      editorFindRequestKeyByThreadId: {},
+      pendingRevealTargetByThreadId: {},
     });
   });
 
   it("persists workspace open state and pane width", () => {
     useWorkspaceWorkbenchStore.getState().setWorkspaceOpen(true);
+    useWorkspaceWorkbenchStore.getState().focusSearchPane(THREAD_ID);
     useWorkspaceWorkbenchStore.getState().setWorkspacePaneWidth(WORKSPACE_INLINE_MAX_WIDTH + 500);
     const persistedState = partializeWorkspaceWorkbenchState(
       useWorkspaceWorkbenchStore.getState(),
@@ -51,6 +60,197 @@ describe("workspaceWorkbenchStore", () => {
     expect(persistedState.isWorkspaceOpen).toBe(true);
     expect(persistedState.workspacePaneWidth).toBe(
       clampWorkspacePaneWidth(WORKSPACE_INLINE_MAX_WIDTH + 500),
+    );
+    expect("searchStateByThreadId" in persistedState).toBe(false);
+    expect("paneModeByThreadId" in persistedState).toBe(false);
+  });
+
+  it("persists AI review editing state with accepted hunks", () => {
+    const store = useWorkspaceWorkbenchStore.getState();
+    const relativePath = "src/index.ts";
+    const key = workspaceFileStateKey(THREAD_ID, relativePath);
+    const acceptanceKey = workspaceAiReviewKey(THREAD_ID, relativePath, "turn-ai-review" as never);
+
+    store.syncThreadRoot(THREAD_ID, "/repo");
+    store.openFile(THREAD_ID, relativePath);
+    store.hydrateFileDraft(THREAD_ID, relativePath, {
+      contents: "export const value = 1;\n",
+      mtimeMs: 10,
+    });
+    store.setAiReviewState(THREAD_ID, relativePath, {
+      turnId: "turn-ai-review" as never,
+      snapshotContents: "export const value = 1;\n",
+      hunks: [
+        {
+          id: "hunk-1",
+          startLine: 1,
+          endLine: 1,
+          deletedLines: [],
+          addedLines: [
+            {
+              text: "export const value = 2;",
+              emphasizedRanges: [{ start: 21, end: 22 }],
+            },
+          ],
+        },
+      ],
+      acceptedHunkIds: [],
+      status: "active",
+    });
+    store.acceptAiReviewHunk(THREAD_ID, relativePath, "hunk-1");
+
+    const persistedState = partializeWorkspaceWorkbenchState(
+      useWorkspaceWorkbenchStore.getState(),
+    ) as {
+      aiReviewStateByThreadIdAndPath?: Record<string, unknown>;
+      editorFindRequestKeyByThreadId?: unknown;
+      pendingRevealTargetByThreadId?: unknown;
+    };
+
+    expect(persistedState.aiReviewStateByThreadIdAndPath?.[key]).toMatchObject({
+      turnId: "turn-ai-review",
+      snapshotContents: "export const value = 1;\n",
+      acceptedHunkIds: ["hunk-1"],
+      status: "completed",
+    });
+    expect(
+      (
+        persistedState as {
+          acceptedAiReviewHunksByKey?: Record<string, string[]>;
+        }
+      ).acceptedAiReviewHunksByKey?.[acceptanceKey],
+    ).toEqual(["hunk-1"]);
+    expect("editorFindRequestKeyByThreadId" in persistedState).toBe(false);
+    expect("pendingRevealTargetByThreadId" in persistedState).toBe(false);
+  });
+
+  it("accepts all active AI review hunks for the current file", () => {
+    const store = useWorkspaceWorkbenchStore.getState();
+    const relativePath = "src/index.ts";
+    const key = workspaceFileStateKey(THREAD_ID, relativePath);
+    const acceptanceKey = workspaceAiReviewKey(THREAD_ID, relativePath, "turn-ai-review" as never);
+
+    store.setAiReviewState(THREAD_ID, relativePath, {
+      turnId: "turn-ai-review" as never,
+      snapshotContents: "export const value = 2;\nconsole.info(value);\n",
+      hunks: [
+        {
+          id: "hunk-1",
+          startLine: 1,
+          endLine: 1,
+          deletedLines: [],
+          addedLines: [{ text: "export const value = 2;", emphasizedRanges: [] }],
+        },
+        {
+          id: "hunk-2",
+          startLine: 2,
+          endLine: 2,
+          deletedLines: [],
+          addedLines: [{ text: "console.info(value);", emphasizedRanges: [] }],
+        },
+      ],
+      acceptedHunkIds: ["hunk-1"],
+      status: "active",
+    });
+
+    store.acceptAllAiReviewHunks(THREAD_ID, relativePath);
+
+    expect(useWorkspaceWorkbenchStore.getState().aiReviewStateByThreadIdAndPath[key]).toMatchObject(
+      {
+        acceptedHunkIds: ["hunk-1", "hunk-2"],
+        status: "completed",
+      },
+    );
+    expect(useWorkspaceWorkbenchStore.getState().acceptedAiReviewHunksByKey[acceptanceKey]).toEqual(
+      ["hunk-1", "hunk-2"],
+    );
+  });
+
+  it("rehydrates AI review state after app reopen", async () => {
+    const relativePath = "src/index.ts";
+    const key = workspaceFileStateKey(THREAD_ID, relativePath);
+    const acceptanceKey = workspaceAiReviewKey(THREAD_ID, relativePath, "turn-ai-review" as never);
+    const persistedState = JSON.parse(
+      JSON.stringify({
+        isWorkspaceOpen: true,
+        workspacePaneWidth: WORKSPACE_INLINE_DEFAULT_WIDTH,
+        threadStateByThreadId: {
+          [THREAD_ID]: {
+            rootPath: "/repo",
+            selectedPath: relativePath,
+            expandedDirectoryPaths: ["src"],
+          },
+        },
+        openFilePathsByThreadId: {
+          [THREAD_ID]: [relativePath],
+        },
+        activeFilePathByThreadId: {
+          [THREAD_ID]: relativePath,
+        },
+        draftContentByThreadIdAndPath: {
+          [key]: "export const value = 2;\n",
+        },
+        baseMtimeMsByThreadIdAndPath: {
+          [key]: 10,
+        },
+        isDirtyByThreadIdAndPath: {
+          [key]: true,
+        },
+        lastLoadErrorByThreadIdAndPath: {},
+        aiReviewStateByThreadIdAndPath: {
+          [key]: {
+            turnId: "turn-ai-review",
+            snapshotContents: "export const value = 1;\n",
+            hunks: [
+              {
+                id: "hunk-1",
+                startLine: 1,
+                endLine: 1,
+                deletedLines: [],
+                addedLines: [
+                  {
+                    text: "export const value = 2;",
+                    emphasizedRanges: [{ start: 21, end: 22 }],
+                  },
+                ],
+              },
+            ],
+            acceptedHunkIds: [],
+            status: "active",
+          },
+        },
+        acceptedAiReviewHunksByKey: {
+          [acceptanceKey]: ["hunk-1"],
+        },
+      }),
+    );
+
+    useWorkspaceWorkbenchStore.setState(
+      mergeWorkspaceWorkbenchPersistedState(persistedState, useWorkspaceWorkbenchStore.getState()),
+    );
+    useWorkspaceWorkbenchStore.getState().setHasHydrated(true);
+
+    const state = useWorkspaceWorkbenchStore.getState();
+    expect(state.hasHydrated).toBe(true);
+    expect(state.isWorkspaceOpen).toBe(true);
+    expect(state.threadStateByThreadId[THREAD_ID]).toMatchObject({
+      rootPath: "/repo",
+      selectedPath: relativePath,
+    });
+    expect(state.aiReviewStateByThreadIdAndPath[key]).toMatchObject({
+      turnId: "turn-ai-review",
+      snapshotContents: "export const value = 1;\n",
+      status: "active",
+    });
+    expect(state.acceptedAiReviewHunksByKey[acceptanceKey]).toEqual(["hunk-1"]);
+
+    state.syncThreadRoot(THREAD_ID, "/repo");
+
+    expect(useWorkspaceWorkbenchStore.getState().aiReviewStateByThreadIdAndPath[key]).toMatchObject(
+      {
+        turnId: "turn-ai-review",
+        status: "active",
+      },
     );
   });
 
@@ -122,6 +322,7 @@ describe("workspaceWorkbenchStore", () => {
   it("clears stale thread selection and expansion when the root changes", () => {
     const store = useWorkspaceWorkbenchStore.getState();
     store.syncThreadRoot(THREAD_ID, "/repo-a");
+    store.focusSearchPane(THREAD_ID);
     store.setDirectoryExpanded(THREAD_ID, "/repo-a/src", true);
     store.openFile(THREAD_ID, "/repo-a/src/index.ts");
     store.hydrateFileDraft(THREAD_ID, "src/index.ts", {
@@ -156,6 +357,46 @@ describe("workspaceWorkbenchStore", () => {
         workspaceFileStateKey(THREAD_ID, "src/index.ts")
       ],
     ).toBeUndefined();
+    expect(useWorkspaceWorkbenchStore.getState().paneModeByThreadId[THREAD_ID]).toBeUndefined();
+    expect(
+      selectWorkspaceSearchState(
+        useWorkspaceWorkbenchStore.getState().searchStateByThreadId,
+        THREAD_ID,
+      ).query,
+    ).toBe("");
+  });
+
+  it("tracks search pane state per thread without leaking between threads", () => {
+    const store = useWorkspaceWorkbenchStore.getState();
+
+    store.focusSearchPane(THREAD_ID);
+    store.updateSearchState(THREAD_ID, {
+      query: "needle",
+      includeGlobInput: "src/**/*.ts",
+    });
+    store.focusSearchPane(OTHER_THREAD_ID);
+    store.updateSearchState(OTHER_THREAD_ID, {
+      query: "other",
+    });
+
+    expect(
+      selectWorkspaceSearchState(
+        useWorkspaceWorkbenchStore.getState().searchStateByThreadId,
+        THREAD_ID,
+      ),
+    ).toMatchObject({
+      query: "needle",
+      includeGlobInput: "src/**/*.ts",
+    });
+    expect(
+      selectWorkspaceSearchState(
+        useWorkspaceWorkbenchStore.getState().searchStateByThreadId,
+        OTHER_THREAD_ID,
+      ),
+    ).toMatchObject({
+      query: "other",
+      includeGlobInput: "",
+    });
   });
 
   it("keeps unique open tabs in order and reactivates existing tabs without duplication", () => {

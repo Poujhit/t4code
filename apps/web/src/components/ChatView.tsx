@@ -28,7 +28,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { gitStatusQueryOptions } from "~/lib/gitReactQuery";
+import { refreshGitStatus, useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
@@ -62,6 +62,7 @@ import {
   buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
   setPendingUserInputCustomAnswer,
+  togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
 import { useStore } from "../store";
@@ -582,6 +583,14 @@ function PersistentThreadTerminalDrawer({
   );
 }
 
+function isWorkspaceEditorFocused(): boolean {
+  const activeElement = document.activeElement;
+  return (
+    activeElement instanceof HTMLElement &&
+    activeElement.closest(".workspace-editor-codemirror") !== null
+  );
+}
+
 export default function ChatView({ threadId, registerCodeSelectionPromptHandler }: ChatViewProps) {
   const serverThread = useThreadById(threadId);
   const setStoreThreadError = useStore((store) => store.setError);
@@ -756,6 +765,8 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
   const workspaceOpen = useWorkspaceWorkbenchStore((state) => state.isWorkspaceOpen);
   const setWorkspaceOpen = useWorkspaceWorkbenchStore((state) => state.setWorkspaceOpen);
   const toggleWorkspaceOpen = useWorkspaceWorkbenchStore((state) => state.toggleWorkspaceOpen);
+  const focusWorkspaceSearchPane = useWorkspaceWorkbenchStore((state) => state.focusSearchPane);
+  const requestWorkspaceEditorFind = useWorkspaceWorkbenchStore((state) => state.requestEditorFind);
   const revealWorkspaceFile = useWorkspaceWorkbenchStore((state) => state.revealFile);
   const storeSetTerminalOpen = useTerminalStateStore((s) => s.setTerminalOpen);
   const storeSplitTerminal = useTerminalStateStore((s) => s.splitTerminal);
@@ -1336,6 +1347,13 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
+  const latestTurnDiffSummaryWithFiles = useMemo(
+    () =>
+      [...turnDiffSummaries]
+        .filter((summary) => summary.files.length > 0)
+        .toSorted((left, right) => right.completedAt.localeCompare(left.completedAt))[0] ?? null,
+    [turnDiffSummaries],
+  );
   const turnDiffSummaryByAssistantMessageId = useMemo(() => {
     const byMessageId = new Map<MessageId, TurnDiffSummary>();
     for (const summary of turnDiffSummaries) {
@@ -1402,6 +1420,7 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
         worktreePath: activeThread?.worktreePath ?? null,
       })
     : null;
+  const lastSettledTurnGitRefreshKeyRef = useRef<string | null>(null);
   const composerTriggerKind = composerTrigger?.kind ?? null;
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
   const isPathTrigger = composerTriggerKind === "path";
@@ -1411,7 +1430,19 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
     (debouncerState) => ({ isPending: debouncerState.isPending }),
   );
   const effectivePathQuery = pathTriggerQuery.length > 0 ? debouncedPathQuery : "";
-  const gitStatusQuery = useQuery(gitStatusQueryOptions(gitCwd));
+  const gitStatusQuery = useGitStatus(gitCwd);
+  useEffect(() => {
+    if (gitCwd === null) return;
+    if (!latestTurnDiffSummaryWithFiles) return;
+
+    const refreshKey = `${gitCwd}:${latestTurnDiffSummaryWithFiles.turnId}:${latestTurnDiffSummaryWithFiles.completedAt}`;
+    if (lastSettledTurnGitRefreshKeyRef.current === refreshKey) {
+      return;
+    }
+
+    lastSettledTurnGitRefreshKeyRef.current = refreshKey;
+    void refreshGitStatus(gitCwd).catch(() => undefined);
+  }, [gitCwd, latestTurnDiffSummaryWithFiles]);
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
   const modelOptionsByProvider = useMemo(
@@ -1490,7 +1521,7 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
           type: "slash-command",
           command: "default",
           label: "/default",
-          description: "Switch this thread back to normal chat mode",
+          description: "Switch this thread back to normal build mode",
         },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
@@ -1540,6 +1571,7 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
   );
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
+  const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   const activeTerminalLaunchContext =
     terminalLaunchContext?.threadId === activeThreadId
       ? terminalLaunchContext
@@ -2684,6 +2716,25 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
         return;
       }
 
+      if (command === "workspace.findInFiles") {
+        if (!gitCwd) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setWorkspaceOpen(true);
+        focusWorkspaceSearchPane(activeThreadId);
+        return;
+      }
+
+      if (command === "editor.find") {
+        if (!isWorkspaceEditorFocused()) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        requestWorkspaceEditorFind(activeThreadId);
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -2701,7 +2752,11 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
     activeThreadId,
     closeTerminal,
     createNewTerminal,
+    focusWorkspaceSearchPane,
+    gitCwd,
     setTerminalOpen,
+    setWorkspaceOpen,
+    requestWorkspaceEditorFind,
     runProjectScript,
     splitTerminal,
     keybindings,
@@ -3238,19 +3293,24 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
     [activePendingUserInput],
   );
 
-  const onSelectActivePendingUserInputOption = useCallback(
+  const onToggleActivePendingUserInputOption = useCallback(
     (questionId: string, optionLabel: string) => {
       if (!activePendingUserInput) {
+        return;
+      }
+      const question = activePendingUserInput.questions.find((entry) => entry.id === questionId);
+      if (!question) {
         return;
       }
       setPendingUserInputAnswersByRequestId((existing) => ({
         ...existing,
         [activePendingUserInput.requestId]: {
           ...existing[activePendingUserInput.requestId],
-          [questionId]: {
-            selectedOptionLabel: optionLabel,
-            customAnswer: "",
-          },
+          [questionId]: togglePendingUserInputOptionSelection(
+            question,
+            existing[activePendingUserInput.requestId]?.[questionId],
+            optionLabel,
+          ),
         },
       }));
       promptRef.current = "";
@@ -4121,7 +4181,7 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
             <form
               ref={composerFormRef}
               onSubmit={onSend}
-              className="mx-auto w-full min-w-0 max-w-[52rem]"
+              className="mx-auto w-full min-w-0 max-w-208"
               data-chat-composer-form="true"
             >
               <div
@@ -4155,7 +4215,7 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
                         respondingRequestIds={respondingRequestIds}
                         answers={activePendingDraftAnswers}
                         questionIndex={activePendingQuestionIndex}
-                        onSelectOption={onSelectActivePendingUserInputOption}
+                        onToggleOption={onToggleActivePendingUserInputOption}
                         onAdvance={onAdvanceActivePendingUserInput}
                       />
                     </div>
@@ -4376,13 +4436,13 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
                               onClick={toggleInteractionMode}
                               title={
                                 interactionMode === "plan"
-                                  ? "Plan mode — click to return to normal chat mode"
+                                  ? "Plan mode — click to return to normal build mode"
                                   : "Default mode — click to enter plan mode"
                               }
                             >
                               <BotIcon />
                               <span className="sr-only sm:not-sr-only">
-                                {interactionMode === "plan" ? "Plan" : "Chat"}
+                                {interactionMode === "plan" ? "Plan" : "Build"}
                               </span>
                             </Button>
 
@@ -4531,7 +4591,7 @@ export default function ChatView({ threadId, registerCodeSelectionPromptHandler 
             activePlan={activePlan}
             activeProposedPlan={sidebarProposedPlan}
             markdownCwd={gitCwd ?? undefined}
-            workspaceRoot={activeProject?.cwd ?? undefined}
+            workspaceRoot={activeWorkspaceRoot}
             timestampFormat={timestampFormat}
             onClose={() => {
               setPlanSidebarOpen(false);

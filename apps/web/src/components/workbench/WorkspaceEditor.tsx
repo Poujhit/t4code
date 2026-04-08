@@ -20,7 +20,14 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { bracketMatching, indentOnInput } from "@codemirror/language";
+import {
+  bracketMatching,
+  codeFolding,
+  foldGutter,
+  foldKeymap,
+  indentOnInput,
+} from "@codemirror/language";
+import { openSearchPanel, search } from "@codemirror/search";
 import { css } from "@codemirror/lang-css";
 import { go } from "@codemirror/lang-go";
 import { html } from "@codemirror/lang-html";
@@ -50,9 +57,15 @@ import {
 } from "~/lib/workspaceCodeSelection";
 import { useTurnDiffSummaries } from "~/hooks/useTurnDiffSummaries";
 import { useStore } from "~/store";
-import { useWorkspaceWorkbenchStore, workspaceFileStateKey } from "~/workspaceWorkbenchStore";
+import {
+  useWorkspaceWorkbenchStore,
+  workspaceAiReviewKey,
+  workspaceFileStateKey,
+  type WorkspaceMatchRevealTarget,
+} from "~/workspaceWorkbenchStore";
 import { WorkspaceEditorHeader } from "./WorkspaceEditorHeader";
 import { WorkspaceFileFallback } from "./WorkspaceFileFallback";
+import { WorkspaceEditorMinimap } from "./WorkspaceEditorMinimap";
 import { WorkspaceOpenFilesBar } from "./WorkspaceOpenFilesBar";
 
 function classifyWorkspaceFileError(error: unknown): {
@@ -86,6 +99,24 @@ function languageExtensionForPath(relativePath: string): Extension | null {
   return null;
 }
 
+function foldExtensionsForPath(relativePath: string): Extension[] {
+  if (!languageExtensionForPath(relativePath)) {
+    return [];
+  }
+
+  return [
+    codeFolding(),
+    foldGutter({
+      markerDOM(open) {
+        const marker = document.createElement("span");
+        marker.className = `cm-foldMarker ${open ? "cm-foldMarker-open" : "cm-foldMarker-closed"}`;
+        marker.textContent = open ? "⌄" : "›";
+        return marker;
+      },
+    }),
+  ];
+}
+
 function readPrimarySelectionSnapshot(
   view: EditorView,
   relativePath: string,
@@ -103,6 +134,118 @@ function readPrimarySelectionSnapshot(
 
 function clampLineNumber(doc: Text, lineNumber: number): number {
   return Math.max(1, Math.min(doc.lines, lineNumber));
+}
+
+function positionForLineAndColumn(doc: Text, lineNumber: number, column: number): number {
+  const safeLine = clampLineNumber(doc, lineNumber);
+  const line = doc.line(safeLine);
+  const safeColumn = Math.max(1, Math.min(line.text.length + 1, column));
+  return Math.min(line.to, line.from + safeColumn - 1);
+}
+
+function revealWorkspaceMatch(view: EditorView, target: WorkspaceMatchRevealTarget) {
+  const from = positionForLineAndColumn(view.state.doc, target.lineNumber, target.startColumn);
+  const to = positionForLineAndColumn(view.state.doc, target.lineNumber, target.endColumn);
+  const rangeEnd = Math.max(from, to);
+  const scroller = view.scrollDOM;
+  view.dispatch({
+    selection: EditorSelection.single(from, rangeEnd),
+    effects: EditorView.scrollIntoView(from, { x: "center", y: "center" }),
+  });
+
+  const lineTop = view.lineBlockAt(from).top;
+  const targetTop = Math.max(0, lineTop - scroller.clientHeight / 2);
+  const startCoords = view.coordsAtPos(from);
+  const endCoords = view.coordsAtPos(rangeEnd);
+  if (!startCoords) {
+    scroller.scrollTo({ top: targetTop });
+    return;
+  }
+
+  const scrollerRect = scroller.getBoundingClientRect();
+  const matchLeft = startCoords.left + scroller.scrollLeft - scrollerRect.left;
+  const matchRight =
+    (endCoords?.right ?? startCoords.right) + scroller.scrollLeft - scrollerRect.left;
+  const targetLeft = Math.max(0, (matchLeft + matchRight) / 2 - scroller.clientWidth / 2);
+
+  scroller.scrollTo({ top: targetTop, left: targetLeft });
+
+  requestAnimationFrame(() => {
+    const domNodeAtPos = view.domAtPos(from).node;
+    const domElementAtPos =
+      domNodeAtPos instanceof HTMLElement ? domNodeAtPos : domNodeAtPos.parentElement;
+
+    domElementAtPos?.closest<HTMLElement>(".cm-line")?.scrollIntoView({ block: "center" });
+
+    requestAnimationFrame(() => {
+      const measuredStartCoords = view.coordsAtPos(from);
+      const measuredEndCoords = view.coordsAtPos(rangeEnd);
+      if (!measuredStartCoords) {
+        return;
+      }
+
+      const scrollerRect = scroller.getBoundingClientRect();
+      const centeredLeft =
+        (measuredStartCoords.left + (measuredEndCoords?.right ?? measuredStartCoords.right)) / 2 +
+        scroller.scrollLeft -
+        scrollerRect.left -
+        scroller.clientWidth / 2;
+
+      scroller.scrollTo({
+        top: scroller.scrollTop,
+        left: Math.max(0, centeredLeft),
+      });
+    });
+  });
+}
+
+const NOOP = () => {};
+const EMPTY_HUNK_IDS: readonly string[] = Object.freeze([]);
+
+function bindSearchPanelReplaceControls(root: HTMLElement): () => void {
+  let currentCleanup = NOOP;
+
+  const sync = () => {
+    currentCleanup();
+
+    const panel = root.querySelector<HTMLElement>(".cm-search");
+    const replaceField = panel?.querySelector<HTMLInputElement>("input[name='replace']");
+    const replaceButton = panel?.querySelector<HTMLButtonElement>("button[name='replace']");
+    const replaceAllButton = panel?.querySelector<HTMLButtonElement>("button[name='replaceAll']");
+
+    if (!panel || !replaceField || !replaceButton || !replaceAllButton) {
+      currentCleanup = NOOP;
+      return;
+    }
+
+    const update = () => {
+      const disabled = replaceField.value.trim().length === 0;
+      replaceButton.disabled = disabled;
+      replaceAllButton.disabled = disabled;
+    };
+
+    update();
+    replaceField.addEventListener("input", update);
+    replaceField.addEventListener("change", update);
+    currentCleanup = () => {
+      replaceField.removeEventListener("input", update);
+      replaceField.removeEventListener("change", update);
+    };
+  };
+
+  sync();
+  const observer = new MutationObserver(() => {
+    sync();
+  });
+  observer.observe(root, {
+    childList: true,
+    subtree: true,
+  });
+
+  return () => {
+    observer.disconnect();
+    currentCleanup();
+  };
 }
 
 function readLineRangeSelectionSnapshot(
@@ -204,20 +347,20 @@ function editorTheme(_resolvedTheme: "light" | "dark"): Extension {
         overflowX: "auto",
         overflowY: "auto",
         overscrollBehavior: "contain",
-        scrollbarWidth: "thin",
+        scrollbarWidth: "auto",
         scrollbarColor: "rgba(255, 255, 255, 0.1) transparent",
         backgroundColor: "var(--background)",
       },
       "& .cm-scroller::-webkit-scrollbar": {
-        width: "6px",
-        height: "6px",
+        width: "10px",
+        height: "10px",
       },
       "& .cm-scroller::-webkit-scrollbar-track": {
         background: "transparent",
       },
       "& .cm-scroller::-webkit-scrollbar-thumb": {
         background: "rgba(255, 255, 255, 0.1)",
-        borderRadius: "3px",
+        borderRadius: "999px",
       },
       "& .cm-scroller::-webkit-scrollbar-thumb:hover": {
         background: "rgba(255, 255, 255, 0.18)",
@@ -239,6 +382,12 @@ function editorTheme(_resolvedTheme: "light" | "dark"): Extension {
         backgroundColor: gutterBackground,
         color: "var(--muted-foreground)",
         borderRight: "1px solid color-mix(in srgb, var(--border) 78%, transparent)",
+      },
+      "& .cm-foldGutter": {
+        width: "1.25rem",
+      },
+      "& .cm-foldGutter .cm-gutterElement": {
+        padding: "0 2px 0 4px",
       },
       "& .cm-lineNumbers": {
         backgroundColor: gutterBackground,
@@ -263,6 +412,28 @@ function editorTheme(_resolvedTheme: "light" | "dark"): Extension {
       },
       "& .cm-line": {
         paddingLeft: "2px",
+      },
+      "& .cm-foldMarker": {
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "14px",
+        height: "14px",
+        borderRadius: "3px",
+        color: "var(--muted-foreground)",
+        fontSize: "11px",
+        lineHeight: "1",
+      },
+      "& .cm-gutterElement:hover .cm-foldMarker": {
+        backgroundColor: "color-mix(in srgb, var(--accent) 80%, transparent)",
+        color: "var(--foreground)",
+      },
+      "& .cm-foldPlaceholder": {
+        border: "1px solid color-mix(in srgb, var(--border) 78%, transparent)",
+        borderRadius: "4px",
+        backgroundColor: "color-mix(in srgb, var(--card) 88%, var(--background))",
+        color: "var(--muted-foreground)",
+        padding: "0 6px",
       },
       "& .cm-ai-review-line": {
         backgroundColor: "color-mix(in srgb, var(--background) 80%, var(--primary) 20%)",
@@ -340,6 +511,160 @@ function editorTheme(_resolvedTheme: "light" | "dark"): Extension {
       },
       "& .cm-content ::selection": {
         backgroundColor: "rgba(62, 116, 253, 0.42)",
+      },
+      "& .cm-panels": {
+        backgroundColor: "color-mix(in srgb, var(--card) 98%, var(--background))",
+        color: "var(--foreground)",
+      },
+      "& .cm-panels-top": {
+        borderBottom: "1px solid color-mix(in srgb, var(--border) 78%, transparent)",
+      },
+      "& .cm-panels-bottom": {
+        borderTop: "1px solid color-mix(in srgb, var(--border) 78%, transparent)",
+      },
+      "& .cm-panel": {
+        backgroundColor: "color-mix(in srgb, var(--background) 94%, var(--card))",
+        color: "var(--foreground)",
+      },
+      "& .cm-searchMatch": {
+        borderRadius: "3px",
+        backgroundColor: "color-mix(in srgb, #f59e0b 28%, transparent)",
+        boxShadow: "inset 0 0 0 1px color-mix(in srgb, #f59e0b 46%, transparent)",
+      },
+      "& .cm-searchMatch.cm-searchMatch-selected": {
+        backgroundColor: "color-mix(in srgb, var(--primary) 78%, var(--color-white) 8%)",
+        color: "var(--primary-foreground)",
+        boxShadow:
+          "inset 0 0 0 1px color-mix(in srgb, var(--primary) 94%, var(--color-white) 12%), 0 0 0 1px color-mix(in srgb, var(--primary) 34%, transparent)",
+      },
+      "& .cm-search": {
+        position: "relative",
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: "6px",
+        padding: "5px 8px 7px",
+        paddingRight: "24px",
+      },
+      "& .cm-search > *": {
+        margin: "0",
+      },
+      "& .cm-search input[name='search']": {
+        order: 1,
+        flex: "1 1 100%",
+      },
+      "& .cm-search button[name='next']": {
+        order: 2,
+      },
+      "& .cm-search button[name='prev']": {
+        order: 3,
+      },
+      "& .cm-search button[name='select']": {
+        order: 4,
+      },
+      "& .cm-search label": {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        fontSize: "12px",
+        lineHeight: "1",
+        color: "var(--muted-foreground)",
+        whiteSpace: "nowrap",
+      },
+      "& .cm-search label:has(input[name='case'])": {
+        order: 5,
+      },
+      "& .cm-search label:has(input[name='re'])": {
+        order: 6,
+      },
+      "& .cm-search label:has(input[name='word'])": {
+        order: 7,
+      },
+      "& .cm-search br": {
+        order: 8,
+        flexBasis: "100%",
+        height: "0",
+        content: '""',
+      },
+      "& .cm-search input[name='replace']": {
+        order: 9,
+        flex: "1 1 100%",
+      },
+      "& .cm-search button[name='replace']": {
+        order: 10,
+      },
+      "& .cm-search button[name='replaceAll']": {
+        order: 11,
+      },
+      "& .cm-search input[name='search'], & .cm-search input[name='replace']": {
+        minWidth: "0",
+        height: "24px",
+        borderRadius: "0",
+        border: "1px solid color-mix(in srgb, var(--primary) 22%, var(--border))",
+        backgroundColor: "color-mix(in srgb, var(--background) 68%, var(--color-black))",
+        color: "var(--foreground)",
+        padding: "0 7px",
+        boxSizing: "border-box",
+        outline: "none",
+        fontSize: "12px",
+        lineHeight: "24px",
+        boxShadow:
+          "inset 0 1px 0 color-mix(in srgb, var(--color-white) 5%, transparent), 0 0 0 1px color-mix(in srgb, var(--primary) 8%, transparent)",
+      },
+      "& .cm-search input[name='search']:focus, & .cm-search input[name='replace']:focus": {
+        borderColor: "color-mix(in srgb, var(--primary) 62%, var(--border))",
+        boxShadow:
+          "inset 0 1px 0 color-mix(in srgb, var(--color-white) 6%, transparent), 0 0 0 1px color-mix(in srgb, var(--primary) 32%, transparent)",
+      },
+      "& .cm-search input[name='search']::placeholder, & .cm-search input[name='replace']::placeholder":
+        {
+          color: "var(--muted-foreground)",
+        },
+      "& .cm-search input[type='checkbox']": {
+        margin: "0",
+        accentColor: "var(--primary)",
+      },
+      "& .cm-search button": {
+        height: "24px",
+        borderRadius: "0",
+        border: "1px solid color-mix(in srgb, var(--border) 90%, transparent)",
+        background:
+          "linear-gradient(180deg, color-mix(in srgb, var(--card) 98%, var(--color-white)) 0%, color-mix(in srgb, var(--background) 88%, var(--color-black)) 100%)",
+        color: "var(--foreground)",
+        padding: "0 9px",
+        fontSize: "11px",
+        fontWeight: "600",
+        lineHeight: "1",
+        textTransform: "lowercase",
+        cursor: "pointer",
+        boxShadow: "inset 0 1px 0 color-mix(in srgb, var(--color-white) 6%, transparent)",
+      },
+      "& .cm-search button:hover": {
+        background:
+          "linear-gradient(180deg, color-mix(in srgb, var(--accent) 90%, var(--color-white)) 0%, color-mix(in srgb, var(--accent) 56%, var(--background)) 100%)",
+      },
+      "& .cm-search button:disabled": {
+        opacity: "0.5",
+        cursor: "default",
+      },
+      "& .cm-search button[name='close']": {
+        position: "absolute",
+        top: "5px",
+        right: "6px",
+        width: "16px",
+        height: "16px",
+        padding: "0",
+        border: "none",
+        backgroundColor: "transparent",
+        color: "var(--muted-foreground)",
+        textTransform: "none",
+        fontSize: "13px",
+        fontWeight: "500",
+        boxShadow: "none",
+      },
+      "& .cm-search button[name='close']:hover": {
+        backgroundColor: "color-mix(in srgb, var(--accent) 70%, transparent)",
+        color: "var(--foreground)",
       },
     },
     { dark: true },
@@ -586,6 +911,7 @@ function createBaseEditorExtensions(params: {
 }) {
   return [
     oneDark,
+    search({ top: true }),
     drawSelection(),
     dropCursor(),
     history(),
@@ -614,6 +940,7 @@ function createBaseEditorExtensions(params: {
         },
       },
       indentWithTab,
+      ...foldKeymap,
       ...defaultKeymap,
       ...historyKeymap,
     ]),
@@ -662,10 +989,15 @@ function CodeMirrorEditor(props: {
   reviewHunks?: readonly AiReviewHunk[];
   onAcceptReviewHunk?: ((hunkId: string) => void) | null;
   onAddReviewHunkToPrompt?: ((selection: CodeSelection) => void) | null;
+  searchRequestKey?: number;
+  onViewReady?: ((view: EditorView | null) => void) | null;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const initialRelativePathRef = useRef(props.relativePath);
   const initialValueRef = useRef(props.value);
+  const [minimapView, setMinimapView] = useState<EditorView | null>(null);
+  const foldCompartmentRef = useRef(new Compartment());
   const languageCompartmentRef = useRef(new Compartment());
   const themeCompartmentRef = useRef(new Compartment());
   const behaviorCompartmentRef = useRef(new Compartment());
@@ -675,6 +1007,9 @@ function CodeMirrorEditor(props: {
   const onAddSelectionToPromptEvent = useEffectEvent(props.onAddSelectionToPrompt);
   const onAcceptReviewHunkEvent = useEffectEvent(props.onAcceptReviewHunk ?? (() => {}));
   const onAddReviewHunkToPromptEvent = useEffectEvent(props.onAddReviewHunkToPrompt ?? (() => {}));
+  const onViewReadyEvent = useEffectEvent((view: EditorView | null) => {
+    props.onViewReady?.(view);
+  });
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -684,18 +1019,19 @@ function CodeMirrorEditor(props: {
     const state = EditorState.create({
       doc: initialValueRef.current,
       extensions: [
+        foldCompartmentRef.current.of(foldExtensionsForPath(initialRelativePathRef.current)),
         lineNumbers(),
         highlightActiveLineGutter(),
         languageCompartmentRef.current.of(
-          languageExtensionForPath(props.relativePath)
-            ? [languageExtensionForPath(props.relativePath)!]
+          languageExtensionForPath(initialRelativePathRef.current)
+            ? [languageExtensionForPath(initialRelativePathRef.current)!]
             : [],
         ),
         themeCompartmentRef.current.of(editorTheme("dark")),
         behaviorCompartmentRef.current.of(editorBehaviorExtensions(false)),
         reviewCompartmentRef.current.of([]),
         ...createBaseEditorExtensions({
-          relativePath: props.relativePath,
+          relativePath: initialRelativePathRef.current,
           onChange: (value) => onChangeEvent(value),
           onSave: () => onSaveEvent(),
           onAddSelectionToPrompt: (selection) => onAddSelectionToPromptEvent(selection),
@@ -707,11 +1043,23 @@ function CodeMirrorEditor(props: {
       parent: containerRef.current,
     });
     viewRef.current = view;
+    setMinimapView(view);
+    onViewReadyEvent(view);
     return () => {
       view.destroy();
       viewRef.current = null;
+      setMinimapView(null);
+      onViewReadyEvent(null);
     };
-  }, [props.relativePath]);
+  }, []);
+
+  useEffect(() => {
+    if (!containerRef.current || typeof MutationObserver === "undefined") {
+      return;
+    }
+
+    return bindSearchPanelReplaceControls(containerRef.current);
+  }, []);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -730,6 +1078,7 @@ function CodeMirrorEditor(props: {
           }
         : null),
       effects: [
+        foldCompartmentRef.current.reconfigure(foldExtensionsForPath(props.relativePath)),
         languageCompartmentRef.current.reconfigure(
           languageExtensionForPath(props.relativePath)
             ? [languageExtensionForPath(props.relativePath)!]
@@ -752,11 +1101,26 @@ function CodeMirrorEditor(props: {
     });
   }, [props.readOnly, props.relativePath, props.resolvedTheme, props.reviewHunks, props.value]);
 
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !props.searchRequestKey) {
+      return;
+    }
+    view.focus();
+    openSearchPanel(view);
+  }, [props.searchRequestKey]);
+
   return (
-    <div className="workspace-editor-codemirror flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+    <div className="workspace-editor-codemirror flex h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <div
         ref={containerRef}
         className="h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      />
+      <WorkspaceEditorMinimap
+        value={props.value}
+        resolvedTheme={props.resolvedTheme}
+        view={minimapView}
+        reviewHunks={props.reviewHunks ?? []}
       />
     </div>
   );
@@ -771,6 +1135,7 @@ export function WorkspaceEditor(props: {
 }) {
   const queryClient = useQueryClient();
   const draftKey = workspaceFileStateKey(props.threadId, props.relativePath);
+  const bootstrapComplete = useStore((state) => state.bootstrapComplete);
   const activeThread = useStore(
     (state) => state.threads.find((thread) => thread.id === props.threadId) ?? null,
   );
@@ -797,13 +1162,30 @@ export function WorkspaceEditor(props: {
   const aiReviewState = useWorkspaceWorkbenchStore(
     (state) => state.aiReviewStateByThreadIdAndPath[draftKey] ?? null,
   );
+  const editorFindRequestKey = useWorkspaceWorkbenchStore(
+    (state) => state.editorFindRequestKeyByThreadId[props.threadId] ?? 0,
+  );
+  const pendingRevealTarget = useWorkspaceWorkbenchStore(
+    (state) => state.pendingRevealTargetByThreadId[props.threadId] ?? null,
+  );
+  const acceptedAiReviewHunksByKey = useWorkspaceWorkbenchStore(
+    (state) => state.acceptedAiReviewHunksByKey,
+  );
   const setAiReviewState = useWorkspaceWorkbenchStore((state) => state.setAiReviewState);
   const acceptAiReviewHunk = useWorkspaceWorkbenchStore((state) => state.acceptAiReviewHunk);
+  const acceptAllAiReviewHunks = useWorkspaceWorkbenchStore(
+    (state) => state.acceptAllAiReviewHunks,
+  );
   const invalidateAiReviewState = useWorkspaceWorkbenchStore(
     (state) => state.invalidateAiReviewState,
   );
   const clearAiReviewState = useWorkspaceWorkbenchStore((state) => state.clearAiReviewState);
+  const requestEditorFind = useWorkspaceWorkbenchStore((state) => state.requestEditorFind);
+  const clearPendingRevealTarget = useWorkspaceWorkbenchStore(
+    (state) => state.clearPendingRevealTarget,
+  );
   const [isReloading, setIsReloading] = useState(false);
+  const [editorView, setEditorView] = useState<EditorView | null>(null);
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } = useTurnDiffSummaries(
     activeThread ?? undefined,
   );
@@ -844,6 +1226,16 @@ export function WorkspaceEditor(props: {
         })[0] ?? null
     );
   }, [inferredCheckpointTurnCountByTurnId, props.relativePath, turnDiffSummaries]);
+  const persistedAcceptedAiReviewHunkIds = useMemo(() => {
+    if (!latestAiReviewTurn) {
+      return EMPTY_HUNK_IDS;
+    }
+    return (
+      acceptedAiReviewHunksByKey[
+        workspaceAiReviewKey(props.threadId, props.relativePath, latestAiReviewTurn.summary.turnId)
+      ] ?? EMPTY_HUNK_IDS
+    );
+  }, [acceptedAiReviewHunksByKey, latestAiReviewTurn, props.relativePath, props.threadId]);
   const aiReviewDiffQuery = useQuery(
     checkpointDiffQueryOptions({
       threadId: props.threadId,
@@ -897,21 +1289,34 @@ export function WorkspaceEditor(props: {
   const currentContents = draftContent ?? fileQuery.data?.contents ?? "";
   const latestDiskContents = fileQuery.data?.contents ?? "";
   const currentDraftMatchesDisk = currentContents === latestDiskContents;
+  const isAwaitingAiReviewMetadata =
+    aiReviewState !== null &&
+    (!bootstrapComplete || activeThread === null) &&
+    latestAiReviewTurn === null;
 
   useEffect(() => {
     if (!fileQuery.isSuccess || fileQuery.data.isBinary || fileQuery.data.isTooLarge) {
-      clearAiReviewState(props.threadId, props.relativePath);
+      if (aiReviewState !== null) {
+        clearAiReviewState(props.threadId, props.relativePath);
+      }
       return;
     }
     if (!latestAiReviewTurn) {
-      clearAiReviewState(props.threadId, props.relativePath);
+      if (isAwaitingAiReviewMetadata) {
+        return;
+      }
+      if (aiReviewState !== null) {
+        clearAiReviewState(props.threadId, props.relativePath);
+      }
       return;
     }
     if (aiReviewDiffQuery.isPending) {
       return;
     }
     if (aiReviewDiffQuery.isError || parsedAiReviewHunks.length === 0) {
-      clearAiReviewState(props.threadId, props.relativePath);
+      if (aiReviewState !== null) {
+        clearAiReviewState(props.threadId, props.relativePath);
+      }
       return;
     }
     if (!currentDraftMatchesDisk) {
@@ -936,12 +1341,13 @@ export function WorkspaceEditor(props: {
       }
     }
 
-    const acceptedHunkIds =
+    const acceptedHunkIdsSource =
       aiReviewState?.turnId === latestAiReviewTurn.summary.turnId
-        ? aiReviewState.acceptedHunkIds.filter((hunkId) =>
-            parsedAiReviewHunks.some((hunk) => hunk.id === hunkId),
-          )
-        : [];
+        ? aiReviewState.acceptedHunkIds
+        : persistedAcceptedAiReviewHunkIds;
+    const acceptedHunkIds = acceptedHunkIdsSource.filter((hunkId) =>
+      parsedAiReviewHunks.some((hunk) => hunk.id === hunkId),
+    );
     const allAccepted =
       parsedAiReviewHunks.length > 0 &&
       parsedAiReviewHunks.every((hunk) => acceptedHunkIds.includes(hunk.id));
@@ -957,13 +1363,17 @@ export function WorkspaceEditor(props: {
     aiReviewDiffQuery.isError,
     aiReviewDiffQuery.isPending,
     aiReviewState,
+    activeThread,
+    bootstrapComplete,
     clearAiReviewState,
     currentDraftMatchesDisk,
     fileQuery.data,
     fileQuery.isSuccess,
     invalidateAiReviewState,
+    isAwaitingAiReviewMetadata,
     latestAiReviewTurn,
     parsedAiReviewHunks,
+    persistedAcceptedAiReviewHunkIds,
     props.relativePath,
     props.threadId,
     setAiReviewState,
@@ -971,6 +1381,9 @@ export function WorkspaceEditor(props: {
 
   useEffect(() => {
     if (!fileQuery.isSuccess || !aiReviewState || aiReviewState.status !== "active") {
+      return;
+    }
+    if (isAwaitingAiReviewMetadata) {
       return;
     }
     if (
@@ -981,6 +1394,7 @@ export function WorkspaceEditor(props: {
     }
   }, [
     aiReviewState,
+    isAwaitingAiReviewMetadata,
     fileQuery.data,
     fileQuery.isSuccess,
     invalidateAiReviewState,
@@ -1081,6 +1495,61 @@ export function WorkspaceEditor(props: {
   } else if (activeFileError && activeFileError.kind !== "conflict") {
     readOnlyLabel = "Unavailable";
   }
+  const canOpenFind =
+    !fileQuery.isPending &&
+    !fileQuery.isError &&
+    !fileQuery.data?.isBinary &&
+    !fileQuery.data?.isTooLarge;
+  const revealTargetForCurrentFile =
+    pendingRevealTarget?.path === props.relativePath ? pendingRevealTarget : null;
+
+  useEffect(() => {
+    if (
+      !editorView ||
+      !revealTargetForCurrentFile ||
+      !fileQuery.isSuccess ||
+      fileQuery.data.isBinary ||
+      fileQuery.data.isTooLarge
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    let frameId = 0;
+    let attempts = 0;
+
+    const revealWhenReady = () => {
+      if (cancelled) {
+        return;
+      }
+
+      const scroller = editorView.scrollDOM;
+      const hasLayout = scroller.clientHeight > 0 && scroller.clientWidth > 0;
+      if (!hasLayout && attempts < 10) {
+        attempts += 1;
+        frameId = requestAnimationFrame(revealWhenReady);
+        return;
+      }
+
+      editorView.focus();
+      revealWorkspaceMatch(editorView, revealTargetForCurrentFile);
+      clearPendingRevealTarget(props.threadId);
+    };
+
+    frameId = requestAnimationFrame(revealWhenReady);
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frameId);
+    };
+  }, [
+    clearPendingRevealTarget,
+    editorView,
+    fileQuery.data,
+    fileQuery.isSuccess,
+    props.threadId,
+    revealTargetForCurrentFile,
+  ]);
 
   return (
     <div
@@ -1098,6 +1567,10 @@ export function WorkspaceEditor(props: {
         relativePath={props.relativePath}
         isDirty={isDirty}
         readOnlyLabel={readOnlyLabel}
+        canAcceptAllAiChanges={isAiReviewActive}
+        onAcceptAllAiChanges={() => acceptAllAiReviewHunks(props.threadId, props.relativePath)}
+        canOpenFind={canOpenFind}
+        onOpenFind={() => requestEditorFind(props.threadId)}
       />
       {activeFileError?.kind === "conflict" ? (
         <WorkspaceFileFallback
@@ -1150,6 +1623,7 @@ export function WorkspaceEditor(props: {
           />
         ) : (
           <CodeMirrorEditor
+            key={props.relativePath}
             relativePath={props.relativePath}
             value={currentContents}
             resolvedTheme={props.resolvedTheme}
@@ -1158,6 +1632,8 @@ export function WorkspaceEditor(props: {
             onAcceptReviewHunk={(hunkId) => {
               acceptAiReviewHunk(props.threadId, props.relativePath, hunkId);
             }}
+            searchRequestKey={editorFindRequestKey}
+            onViewReady={setEditorView}
             onAddReviewHunkToPrompt={(selection) => {
               props.onAddCodeSelectionToPrompt?.(selection);
             }}

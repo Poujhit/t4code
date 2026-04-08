@@ -2,11 +2,14 @@ import {
   type GitActionProgressEvent,
   type GitRunStackedActionInput,
   type GitRunStackedActionResult,
+  type GitStatusResult,
+  type GitStatusStreamEvent,
   type NativeApi,
   ORCHESTRATION_WS_METHODS,
   type ServerSettingsPatch,
   WS_METHODS,
 } from "@t3tools/contracts";
+import { applyGitStatusStreamEvent } from "@t3tools/shared/git";
 import { Effect, Stream } from "effect";
 
 import { type WsRpcProtocolClient } from "./rpc/protocol";
@@ -55,6 +58,7 @@ export interface WsRpcClient {
   readonly projects: {
     readonly listDirectory: RpcUnaryMethod<typeof WS_METHODS.projectsListDirectory>;
     readonly readFile: RpcUnaryMethod<typeof WS_METHODS.projectsReadFile>;
+    readonly searchFileContents: RpcUnaryMethod<typeof WS_METHODS.projectsSearchFileContents>;
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
     readonly writeFile: RpcUnaryMethod<typeof WS_METHODS.projectsWriteFile>;
   };
@@ -66,7 +70,12 @@ export interface WsRpcClient {
   };
   readonly git: {
     readonly pull: RpcUnaryMethod<typeof WS_METHODS.gitPull>;
-    readonly status: RpcUnaryMethod<typeof WS_METHODS.gitStatus>;
+    readonly refreshStatus: RpcUnaryMethod<typeof WS_METHODS.gitRefreshStatus>;
+    readonly onStatus: (
+      input: RpcInput<typeof WS_METHODS.subscribeGitStatus>,
+      listener: (status: GitStatusResult) => void,
+      options?: StreamSubscriptionOptions,
+    ) => () => void;
     readonly runStackedAction: (
       input: GitRunStackedActionInput,
       options?: GitRunStackedActionOptions,
@@ -144,6 +153,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
         transport.request((client) => client[WS_METHODS.projectsListDirectory](input)),
       readFile: (input) =>
         transport.request((client) => client[WS_METHODS.projectsReadFile](input)),
+      searchFileContents: (input) =>
+        transport.request((client) => client[WS_METHODS.projectsSearchFileContents](input)),
       searchEntries: (input) =>
         transport.request((client) => client[WS_METHODS.projectsSearchEntries](input)),
       writeFile: (input) =>
@@ -155,7 +166,19 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
     },
     git: {
       pull: (input) => transport.request((client) => client[WS_METHODS.gitPull](input)),
-      status: (input) => transport.request((client) => client[WS_METHODS.gitStatus](input)),
+      refreshStatus: (input) =>
+        transport.request((client) => client[WS_METHODS.gitRefreshStatus](input)),
+      onStatus: (input, listener, options) => {
+        let current: GitStatusResult | null = null;
+        return transport.subscribe(
+          (client) => client[WS_METHODS.subscribeGitStatus](input),
+          (event: GitStatusStreamEvent) => {
+            current = applyGitStatusStreamEvent(current, event);
+            listener(current);
+          },
+          options,
+        );
+      },
       runStackedAction: async (input, options) => {
         let result: GitRunStackedActionResult | null = null;
 

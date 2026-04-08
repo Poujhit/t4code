@@ -47,6 +47,18 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedLocal.command, "chat.newLocal");
 
+    const parsedEditorFind = yield* decode(KeybindingRule, {
+      key: "mod+f",
+      command: "editor.find",
+    });
+    assert.strictEqual(parsedEditorFind.command, "editor.find");
+
+    const parsedFindInFiles = yield* decode(KeybindingRule, {
+      key: "mod+shift+f",
+      command: "workspace.findInFiles",
+    });
+    assert.strictEqual(parsedFindInFiles.command, "workspace.findInFiles");
+
     const parsedThreadPrevious = yield* decode(KeybindingRule, {
       key: "mod+shift+[",
       command: "thread.previous",

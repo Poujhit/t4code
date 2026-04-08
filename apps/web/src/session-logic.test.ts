@@ -197,6 +197,7 @@ describe("derivePendingUserInputs", () => {
                   description: "Allow workspace writes only",
                 },
               ],
+              multiSelect: true,
             },
           ],
         },
@@ -233,6 +234,7 @@ describe("derivePendingUserInputs", () => {
                   description: "Continue execution",
                 },
               ],
+              multiSelect: false,
             },
           ],
         },
@@ -254,6 +256,7 @@ describe("derivePendingUserInputs", () => {
                 description: "Allow workspace writes only",
               },
             ],
+            multiSelect: true,
           },
         ],
       },
@@ -281,6 +284,7 @@ describe("derivePendingUserInputs", () => {
                   description: "Allow workspace writes only",
                 },
               ],
+              multiSelect: false,
             },
           ],
         },
@@ -595,14 +599,23 @@ describe("deriveWorkLogEntries", () => {
 
   it("filters by turn id when provided", () => {
     const activities: OrchestrationThreadActivity[] = [
-      makeActivity({ id: "turn-1", turnId: "turn-1", summary: "Tool call", kind: "tool.started" }),
+      makeActivity({
+        id: "turn-1",
+        turnId: "turn-1",
+        summary: "Tool call",
+        kind: "tool.started",
+      }),
       makeActivity({
         id: "turn-2",
         turnId: "turn-2",
         summary: "Tool call complete",
         kind: "tool.completed",
       }),
-      makeActivity({ id: "no-turn", summary: "Checkpoint captured", tone: "info" }),
+      makeActivity({
+        id: "no-turn",
+        summary: "Checkpoint captured",
+        tone: "info",
+      }),
     ];
 
     const entries = deriveWorkLogEntries(activities, TurnId.makeUnsafe("turn-2"));
@@ -1074,7 +1087,12 @@ describe("deriveWorkLogEntries context window handling", () => {
 describe("hasToolActivityForTurn", () => {
   it("returns false when turn id is missing", () => {
     const activities: OrchestrationThreadActivity[] = [
-      makeActivity({ id: "tool-1", turnId: "turn-1", kind: "tool.completed", tone: "tool" }),
+      makeActivity({
+        id: "tool-1",
+        turnId: "turn-1",
+        kind: "tool.completed",
+        tone: "tool",
+      }),
     ];
 
     expect(hasToolActivityForTurn(activities, undefined)).toBe(false);
@@ -1083,8 +1101,18 @@ describe("hasToolActivityForTurn", () => {
 
   it("returns true only for matching tool activity in the target turn", () => {
     const activities: OrchestrationThreadActivity[] = [
-      makeActivity({ id: "tool-1", turnId: "turn-1", kind: "tool.completed", tone: "tool" }),
-      makeActivity({ id: "info-1", turnId: "turn-2", kind: "turn.completed", tone: "info" }),
+      makeActivity({
+        id: "tool-1",
+        turnId: "turn-1",
+        kind: "tool.completed",
+        tone: "tool",
+      }),
+      makeActivity({
+        id: "info-1",
+        turnId: "turn-2",
+        kind: "turn.completed",
+        tone: "info",
+      }),
     ];
 
     expect(hasToolActivityForTurn(activities, TurnId.makeUnsafe("turn-1"))).toBe(true);
