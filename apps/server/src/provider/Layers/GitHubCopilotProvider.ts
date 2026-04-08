@@ -1,4 +1,9 @@
-import type { GitHubCopilotSettings, ServerProvider, ServerProviderAuth } from "@t3tools/contracts";
+import type {
+  GitHubCopilotSettings,
+  ModelCapabilities,
+  ServerProvider,
+  ServerProviderAuth,
+} from "@t3tools/contracts";
 import { Data, Effect, Equal, Layer, Option, Result, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { type GetAuthStatusResponse } from "@github/copilot-sdk";
@@ -23,6 +28,13 @@ import {
 
 const PROVIDER = "githubCopilot" as const;
 const GITHUB_COPILOT_SDK_PROBE_TIMEOUT_MS = 15_000;
+const DEFAULT_GITHUB_COPILOT_MODEL_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  contextWindowOptions: [],
+  promptInjectedEffortLevels: [],
+};
 
 class GitHubCopilotSdkProbeError extends Data.TaggedError("GitHubCopilotSdkProbeError")<{
   readonly detail: string;
@@ -113,7 +125,12 @@ export const checkGitHubCopilotProviderStatus = Effect.fn("checkGitHubCopilotPro
       Effect.map((settings) => settings.providers.githubCopilot),
     );
     const checkedAt = new Date().toISOString();
-    const customModelsOnly = providerModelsFromSettings([], PROVIDER, copilotSettings.customModels);
+    const customModelsOnly = providerModelsFromSettings(
+      [],
+      PROVIDER,
+      copilotSettings.customModels,
+      DEFAULT_GITHUB_COPILOT_MODEL_CAPABILITIES,
+    );
 
     if (!copilotSettings.enabled) {
       return buildServerProvider({
@@ -234,6 +251,7 @@ export const checkGitHubCopilotProviderStatus = Effect.fn("checkGitHubCopilotPro
       sdkStatus.models,
       PROVIDER,
       copilotSettings.customModels,
+      DEFAULT_GITHUB_COPILOT_MODEL_CAPABILITIES,
     );
 
     if (!sdkStatus.authStatus.isAuthenticated) {

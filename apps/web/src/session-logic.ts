@@ -794,9 +794,6 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
 } {
   const data = asRecord(payload?.data);
   const item = asRecord(data?.item);
-  const dataInput = asRecord(data?.input);
-  const dataResult = asRecord(data?.result);
-  const dataArguments = asRecord(data?.arguments);
   const itemResult = asRecord(item?.result);
   const itemInput = asRecord(item?.input);
   // const candidates = [
