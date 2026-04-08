@@ -125,21 +125,14 @@ describe("GitStatusBroadcasterLive", () => {
         aheadCount: 2,
       };
       const refreshed = yield* broadcaster.refreshStatus("/repo");
-      const cached = yield* broadcaster.getStatus({ cwd: "/repo" });
 
       assert.deepStrictEqual(initial, baseStatus);
       assert.deepStrictEqual(refreshed, {
         ...state.currentLocalStatus,
-        ...state.currentRemoteStatus,
-      });
-      assert.deepStrictEqual(cached, {
-        ...state.currentLocalStatus,
-        ...state.currentRemoteStatus,
+        ...baseRemoteStatus,
       });
       assert.equal(state.localStatusCalls, 2);
-      assert.equal(state.remoteStatusCalls, 2);
       assert.equal(state.localInvalidationCalls, 1);
-      assert.equal(state.remoteInvalidationCalls, 1);
     }).pipe(Effect.provide(makeTestLayer(state)));
   });
 
@@ -271,6 +264,68 @@ describe("GitStatusBroadcasterLive", () => {
       yield* Scope.close(secondScope, Exit.void).pipe(Effect.forkScoped);
       yield* Deferred.await(remoteInterrupted);
       assert.equal(Option.isSome(yield* Deferred.poll(remoteInterrupted)), true);
+    }).pipe(Effect.provide(testLayer));
+  });
+
+  it.effect("returns local status immediately when remote refresh hangs", () => {
+    const state = {
+      currentLocalStatus: {
+        ...baseLocalStatus,
+        hasWorkingTreeChanges: true,
+      },
+      currentRemoteStatus: baseRemoteStatus,
+      localStatusCalls: 0,
+      remoteStatusCalls: 0,
+      localInvalidationCalls: 0,
+      remoteInvalidationCalls: 0,
+    };
+
+    const testLayer = GitStatusBroadcasterLive.pipe(
+      Layer.provide(
+        Layer.succeed(GitManager, {
+          localStatus: () =>
+            Effect.sync(() => {
+              state.localStatusCalls += 1;
+              return state.currentLocalStatus;
+            }),
+          remoteStatus: () =>
+            Effect.sync(() => {
+              state.remoteStatusCalls += 1;
+            }).pipe(
+              Effect.andThen(Effect.never as Effect.Effect<GitStatusRemoteResult | null, never>),
+            ),
+          status: () => Effect.die("status should not be called in this test"),
+          invalidateLocalStatus: () =>
+            Effect.sync(() => {
+              state.localInvalidationCalls += 1;
+            }),
+          invalidateRemoteStatus: () =>
+            Effect.sync(() => {
+              state.remoteInvalidationCalls += 1;
+            }),
+          invalidateStatus: () => Effect.die("invalidateStatus should not be called in this test"),
+          resolvePullRequest: () =>
+            Effect.die("resolvePullRequest should not be called in this test"),
+          preparePullRequestThread: () =>
+            Effect.die("preparePullRequestThread should not be called in this test"),
+          runStackedAction: () => Effect.die("runStackedAction should not be called in this test"),
+        } satisfies GitManagerShape),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const broadcaster = yield* GitStatusBroadcaster;
+      const refreshed = yield* broadcaster.refreshStatus("/repo");
+
+      assert.deepStrictEqual(refreshed, {
+        ...state.currentLocalStatus,
+        hasUpstream: false,
+        aheadCount: 0,
+        behindCount: 0,
+        pr: null,
+      });
+      assert.equal(state.localStatusCalls, 1);
+      assert.equal(state.localInvalidationCalls, 1);
     }).pipe(Effect.provide(testLayer));
   });
 });

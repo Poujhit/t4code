@@ -1,4 +1,4 @@
-import type { GitStatusResult } from "@t3tools/contracts";
+import { GitManagerError, type GitStatusResult } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -101,12 +101,58 @@ describe("gitStatusState", () => {
     expect(gitClient.refreshStatus).toHaveBeenCalledWith({ cwd: "/repo" });
     expect(refreshed).toEqual({ ...BASE_STATUS, branch: "/repo-refreshed" });
     expect(getGitStatusSnapshot("/repo")).toEqual({
-      data: BASE_STATUS,
+      data: { ...BASE_STATUS, branch: "/repo-refreshed" },
       error: null,
       cause: null,
       isPending: false,
     });
 
     release();
+  });
+
+  it("stores the refreshed snapshot even before the stream emits a value", async () => {
+    watchGitStatus("/repo-fresh", gitClient);
+
+    expect(getGitStatusSnapshot("/repo-fresh")).toEqual({
+      data: null,
+      error: null,
+      cause: null,
+      isPending: true,
+    });
+
+    const refreshed = await refreshGitStatus("/repo-fresh", gitClient);
+
+    expect(refreshed).toEqual({ ...BASE_STATUS, branch: "/repo-fresh-refreshed" });
+    expect(getGitStatusSnapshot("/repo-fresh")).toEqual({
+      data: { ...BASE_STATUS, branch: "/repo-fresh-refreshed" },
+      error: null,
+      cause: null,
+      isPending: false,
+    });
+  });
+
+  it("stores refresh failures so the UI can surface the real git error", async () => {
+    const failingClient = {
+      ...gitClient,
+      refreshStatus: vi.fn(async () => {
+        throw new GitManagerError({
+          operation: "refreshStatus",
+          detail: "ENOENT: no such file or directory",
+        });
+      }),
+    };
+
+    watchGitStatus("/repo-missing", failingClient);
+
+    await expect(refreshGitStatus("/repo-missing", failingClient)).rejects.toMatchObject({
+      message: "Git manager failed in refreshStatus: ENOENT: no such file or directory",
+    });
+    expect(getGitStatusSnapshot("/repo-missing")).toMatchObject({
+      data: null,
+      error: {
+        message: "Git manager failed in refreshStatus: ENOENT: no such file or directory",
+      },
+      isPending: false,
+    });
   });
 });

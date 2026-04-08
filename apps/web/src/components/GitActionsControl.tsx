@@ -276,7 +276,11 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
     [persistThreadBranchSync],
   );
 
-  const { data: gitStatus = null, error: gitStatusError } = useGitStatus(gitCwd);
+  const {
+    data: gitStatus = null,
+    error: gitStatusError,
+    isPending: gitStatusPending,
+  } = useGitStatus(gitCwd);
   // Default to true while loading so we don't flash init controls.
   const isRepo = gitStatus?.isRepo ?? true;
   const hasOriginRemote = gitStatus?.hasOriginRemote ?? false;
@@ -337,7 +341,11 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
     [gitStatusForActions, hasOriginRemote, isDefaultBranch, isGitActionRunning],
   );
   const quickActionDisabledReason = quickAction.disabled
-    ? (quickAction.hint ?? "This action is currently unavailable.")
+    ? gitStatusPending && !gitStatusError && quickAction.hint === "Git status is unavailable."
+      ? "Loading Git status..."
+      : gitStatusError?.message && quickAction.hint === "Git status is unavailable."
+        ? gitStatusError.message
+        : (quickAction.hint ?? "This action is currently unavailable.")
     : null;
   const pendingDefaultBranchActionCopy = pendingDefaultBranchAction
     ? resolveDefaultBranchActionDialogCopy({

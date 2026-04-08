@@ -194,11 +194,20 @@ export const GitStatusBroadcasterLive = Layer.effect(
     const refreshStatus: GitStatusBroadcasterShape["refreshStatus"] = Effect.fn("refreshStatus")(
       function* (cwd) {
         const normalizedCwd = normalizeCwd(cwd);
-        const [local, remote] = yield* Effect.all([
-          refreshLocalStatus(normalizedCwd),
-          refreshRemoteStatus(normalizedCwd),
-        ]);
-        return mergeGitStatusParts(local, remote);
+        const local = yield* refreshLocalStatus(normalizedCwd);
+        const cachedRemote = (yield* getCachedStatus(normalizedCwd))?.remote?.value ?? null;
+
+        yield* refreshRemoteStatus(normalizedCwd).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("git remote status refresh failed", {
+              cwd: normalizedCwd,
+              detail: error.message,
+            }),
+          ),
+          Effect.forkIn(broadcasterScope),
+        );
+
+        return mergeGitStatusParts(local, cachedRemote);
       },
     );
 

@@ -2,6 +2,7 @@
 import "../index.css";
 
 import {
+  CheckpointRef,
   EventId,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
@@ -41,10 +42,14 @@ import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
+const { refreshGitStatusSpy } = vi.hoisted(() => ({
+  refreshGitStatusSpy: vi.fn(() => Promise.resolve(null)),
+}));
+
 vi.mock("../lib/gitStatusState", () => ({
   useGitStatus: () => ({ data: null, error: null, cause: null, isPending: false }),
   useGitStatuses: () => new Map(),
-  refreshGitStatus: () => Promise.resolve(null),
+  refreshGitStatus: refreshGitStatusSpy,
   resetGitStatusStateForTests: () => undefined,
 }));
 
@@ -659,6 +664,64 @@ function createSnapshotWithPlanFollowUpPrompt(): OrchestrationReadModel {
   };
 }
 
+function createSnapshotWithSettledChangedFilesTurn(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-git-refresh-target" as MessageId,
+    targetText: "refresh git status after edits",
+  });
+
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID
+        ? Object.assign({}, thread, {
+            latestTurn: {
+              turnId: "turn-git-refresh" as TurnId,
+              state: "completed",
+              requestedAt: isoAt(1_000),
+              startedAt: isoAt(1_001),
+              completedAt: isoAt(1_010),
+              assistantMessageId: null,
+            },
+            checkpoints: [
+              {
+                turnId: "turn-git-refresh" as TurnId,
+                checkpointTurnCount: 1,
+                checkpointRef: CheckpointRef.makeUnsafe(
+                  "refs/t3/checkpoints/thread-browser/turn/1",
+                ),
+                status: "ready",
+                files: [
+                  {
+                    path: "components/Dashboard.tsx",
+                    kind: "modified",
+                    additions: 20,
+                    deletions: 1,
+                  },
+                ],
+                assistantMessageId: null,
+                completedAt: isoAt(1_010),
+              },
+            ],
+            activities: [
+              {
+                id: EventId.makeUnsafe("activity-git-refresh-file-change"),
+                tone: "tool",
+                kind: "tool.completed",
+                summary: "File change",
+                payload: {},
+                turnId: "turn-git-refresh" as TurnId,
+                sequence: 1,
+                createdAt: isoAt(1_005),
+              },
+            ],
+            updatedAt: isoAt(1_010),
+          })
+        : thread,
+    ),
+  };
+}
+
 function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
   const customResult = customWsRpcResolver?.(body);
   if (customResult !== undefined) {
@@ -1188,6 +1251,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       terminalEventEntriesByKey: {},
       nextTerminalEventId: 1,
     });
+    refreshGitStatusSpy.mockClear();
   });
 
   afterEach(() => {
@@ -1227,6 +1291,22 @@ describe("ChatView timeline estimator parity (full app)", () => {
       }
     },
   );
+
+  it("refreshes git status after a settled turn reports changed files", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithSettledChangedFilesTurn(),
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(refreshGitStatusSpy).toHaveBeenCalledWith("/repo/project");
+      });
+      expect(refreshGitStatusSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
 
   it("tracks wrapping parity while resizing an existing ChatView across the viewport matrix", async () => {
     const userText = "x".repeat(3_200);

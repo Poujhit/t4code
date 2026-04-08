@@ -989,6 +989,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   const originRemoteExists = (cwd: string): Effect.Effect<boolean, GitCommandError> =>
     executeGit("GitCore.originRemoteExists", cwd, ["remote", "get-url", "origin"], {
       allowNonZeroExit: true,
+      timeoutMs: 5_000,
     }).pipe(Effect.map((result) => result.code === 0));
 
   const listRemoteNames = (cwd: string): Effect.Effect<ReadonlyArray<string>, GitCommandError> =>
@@ -1603,7 +1604,10 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   );
 
   const readConfigValue: GitCoreShape["readConfigValue"] = (cwd, key) =>
-    runGitStdout("GitCore.readConfigValue", cwd, ["config", "--get", key], true).pipe(
+    runGitStdoutWithOptions("GitCore.readConfigValue", cwd, ["config", "--get", key], {
+      allowNonZeroExit: true,
+      timeoutMs: 5_000,
+    }).pipe(
       Effect.map((stdout) => stdout.trim()),
       Effect.map((trimmed) => (trimmed.length > 0 ? trimmed : null)),
     );

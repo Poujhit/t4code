@@ -1,6 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
-import { type GitManagerServiceError, type GitStatusResult } from "@t3tools/contracts";
-import { Cause } from "effect";
+import {
+  GitManagerError,
+  type GitManagerServiceError,
+  type GitStatusResult,
+} from "@t3tools/contracts";
+import { Cause, Schema } from "effect";
 import { Atom } from "effect/unstable/reactivity";
 import { useEffect } from "react";
 
@@ -43,8 +47,10 @@ const watchedGitStatuses = new Map<string, WatchedGitStatus>();
 const knownGitStatusCwds = new Set<string>();
 const gitStatusRefreshInFlight = new Map<string, Promise<GitStatusResult>>();
 const gitStatusLastRefreshAtByCwd = new Map<string, number>();
+const lastSuccessfulGitStatusByCwd = new Map<string, GitStatusResult>();
 
 const GIT_STATUS_REFRESH_DEBOUNCE_MS = 1_000;
+const GIT_STATUS_REQUEST_TIMEOUT_MS = 10_000;
 
 let sharedGitStatusClient: GitStatusClient | null = null;
 
@@ -61,7 +67,18 @@ export function getGitStatusSnapshot(cwd: string | null): GitStatusState {
     return EMPTY_GIT_STATUS_STATE;
   }
 
-  return appAtomRegistry.get(gitStatusStateAtom(cwd));
+  const snapshot = appAtomRegistry.get(gitStatusStateAtom(cwd));
+  if (snapshot.data !== null) {
+    return snapshot;
+  }
+
+  const lastSuccessful = lastSuccessfulGitStatusByCwd.get(cwd) ?? null;
+  return lastSuccessful === null
+    ? snapshot
+    : {
+        ...snapshot,
+        data: lastSuccessful,
+      };
 }
 
 export function watchGitStatus(
@@ -109,11 +126,38 @@ export function refreshGitStatus(
   }
 
   gitStatusLastRefreshAtByCwd.set(cwd, Date.now());
-  const refreshPromise = client.refreshStatus({ cwd }).finally(() => {
-    gitStatusRefreshInFlight.delete(cwd);
-  });
-  gitStatusRefreshInFlight.set(cwd, refreshPromise);
-  return refreshPromise;
+  const refreshRequest = client
+    .refreshStatus({ cwd })
+    .then((status) => {
+      lastSuccessfulGitStatusByCwd.set(cwd, status);
+      return status;
+    })
+    .then((status) => {
+      appAtomRegistry.set(gitStatusStateAtom(cwd), {
+        data: status,
+        error: null,
+        cause: null,
+        isPending: false,
+      });
+      return status;
+    });
+  const refreshWithTimeout = withTimeout(refreshRequest, cwd);
+  const trackedRefreshPromise = refreshWithTimeout
+    .catch((error) => {
+      const normalizedError = toGitStatusError(error);
+      appAtomRegistry.set(gitStatusStateAtom(cwd), {
+        data: null,
+        error: normalizedError,
+        cause: Cause.fail(normalizedError),
+        isPending: false,
+      });
+      throw normalizedError;
+    })
+    .finally(() => {
+      gitStatusRefreshInFlight.delete(cwd);
+    });
+  gitStatusRefreshInFlight.set(cwd, trackedRefreshPromise);
+  return trackedRefreshPromise;
 }
 
 export function resetGitStatusStateForTests(): void {
@@ -123,6 +167,7 @@ export function resetGitStatusStateForTests(): void {
   watchedGitStatuses.clear();
   gitStatusRefreshInFlight.clear();
   gitStatusLastRefreshAtByCwd.clear();
+  lastSuccessfulGitStatusByCwd.clear();
   sharedGitStatusClient = null;
 
   for (const cwd of knownGitStatusCwds) {
@@ -132,10 +177,47 @@ export function resetGitStatusStateForTests(): void {
 }
 
 export function useGitStatus(cwd: string | null): GitStatusState {
-  useEffect(() => watchGitStatus(cwd), [cwd]);
+  useEffect(() => {
+    const unwatch = watchGitStatus(cwd);
+    void refreshGitStatus(cwd).catch(() => undefined);
+    return unwatch;
+  }, [cwd]);
 
   const state = useAtomValue(cwd !== null ? gitStatusStateAtom(cwd) : EMPTY_GIT_STATUS_ATOM);
-  return cwd === null ? EMPTY_GIT_STATUS_STATE : state;
+  if (cwd === null) {
+    return EMPTY_GIT_STATUS_STATE;
+  }
+
+  if (state.data !== null) {
+    return state;
+  }
+
+  const lastSuccessful = lastSuccessfulGitStatusByCwd.get(cwd) ?? null;
+  return lastSuccessful === null
+    ? state
+    : {
+        ...state,
+        data: lastSuccessful,
+      };
+}
+
+function toGitStatusError(error: unknown): GitStatusStreamError {
+  if (Schema.is(GitManagerError)(error)) {
+    return error;
+  }
+
+  if (error instanceof Error) {
+    return new GitManagerError({
+      operation: "refreshStatus",
+      detail: error.message,
+      cause: error,
+    });
+  }
+
+  return new GitManagerError({
+    operation: "refreshStatus",
+    detail: String(error),
+  });
 }
 
 function ensureGitStatusClient(client: GitStatusClient): void {
@@ -182,6 +264,7 @@ function subscribeToGitStatus(cwd: string): () => void {
   return client.onStatus(
     { cwd },
     (status) => {
+      lastSuccessfulGitStatusByCwd.set(cwd, status);
       appAtomRegistry.set(gitStatusStateAtom(cwd), {
         data: status,
         error: null,
@@ -197,14 +280,40 @@ function subscribeToGitStatus(cwd: string): () => void {
   );
 }
 
+function withTimeout(promise: Promise<GitStatusResult>, cwd: string): Promise<GitStatusResult> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(
+        new GitManagerError({
+          operation: "refreshStatus",
+          detail: `Timed out after ${GIT_STATUS_REQUEST_TIMEOUT_MS}ms for ${cwd}`,
+        }),
+      );
+    }, GIT_STATUS_REQUEST_TIMEOUT_MS);
+
+    void promise.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      },
+    );
+  });
+}
+
 function markGitStatusPending(cwd: string): void {
   const atom = gitStatusStateAtom(cwd);
   const current = appAtomRegistry.get(atom);
+  const lastSuccessful = lastSuccessfulGitStatusByCwd.get(cwd) ?? null;
   const next =
-    current.data === null
+    current.data === null && lastSuccessful === null
       ? INITIAL_GIT_STATUS_STATE
       : {
           ...current,
+          ...(current.data === null && lastSuccessful !== null ? { data: lastSuccessful } : {}),
           error: null,
           cause: null,
           isPending: true,

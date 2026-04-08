@@ -41,6 +41,8 @@ const SHORT_SHA_LENGTH = 7;
 const TOAST_DESCRIPTION_MAX = 72;
 const STATUS_RESULT_CACHE_TTL = Duration.seconds(1);
 const STATUS_RESULT_CACHE_CAPACITY = 2_048;
+const HOSTING_PROVIDER_TIMEOUT = Duration.seconds(2);
+const REMOTE_STATUS_TIMEOUT = Duration.seconds(3);
 type StripProgressContext<T> = T extends any ? Omit<T, "actionId" | "cwd" | "action"> : never;
 type GitActionProgressPayload = StripProgressContext<GitActionProgressEvent>;
 type GitActionProgressEmitter = (event: GitActionProgressPayload) => Effect.Effect<void, never>;
@@ -718,7 +720,11 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         Effect.catchIf(isNotGitRepositoryError, () => Effect.succeed(nonRepositoryStatusDetails)),
       );
     const hostingProvider = details.isRepo
-      ? yield* resolveHostingProvider(cwd, details.branch)
+      ? yield* resolveHostingProvider(cwd, details.branch).pipe(
+          Effect.timeoutOption(HOSTING_PROVIDER_TIMEOUT),
+          Effect.map(Option.getOrNull),
+          Effect.catch(() => Effect.succeed(null)),
+        )
       : null;
 
     return {
@@ -752,6 +758,8 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
             branch: details.branch,
             upstreamRef: details.upstreamRef,
           }).pipe(
+            Effect.timeoutOption(REMOTE_STATUS_TIMEOUT),
+            Effect.map(Option.getOrNull),
             Effect.map((latest) => (latest ? toStatusPr(latest) : null)),
             Effect.catch(() => Effect.succeed(null)),
           )
